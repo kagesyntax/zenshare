@@ -1,0 +1,24 @@
+[package]
+name = "zs-transfer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+zs-core = { path = "../zs-core" }
+quinn.workspace = true
+blake3.workspace = true
+postcard.workspace = true
+tokio.workspace = true
+futures.workspace = true
+memmap2.workspace = true
+rustix.workspace = true
+tracing.workspace = true
+getrandom.workspace = true
+sanitize-filename.workspace = true
+unicode-normalization.workspace = true
+anyhow.workspace = true
+
+[lints]
+workspace = true
