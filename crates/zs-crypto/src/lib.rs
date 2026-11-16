@@ -20,8 +20,8 @@
 
 use ed25519_dalek::{Signer, SigningKey, VerifyingKey};
 use std::path::Path;
-use zs_core::DeviceId;
 use zeroize::Zeroize;
+use zs_core::DeviceId;
 
 /// Errors from the identity layer.
 #[derive(Debug, thiserror::Error)]
@@ -50,7 +50,9 @@ pub struct Identity {
 
 impl std::fmt::Debug for Identity {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Identity").field("id", &self.device_id()).finish_non_exhaustive()
+        f.debug_struct("Identity")
+            .field("id", &self.device_id())
+            .finish_non_exhaustive()
     }
 }
 
@@ -67,7 +69,9 @@ impl Identity {
     /// Rebuild from a 32-byte seed.
     #[must_use]
     pub fn from_seed(seed: &[u8; 32]) -> Self {
-        Self { signing: SigningKey::from_bytes(seed) }
+        Self {
+            signing: SigningKey::from_bytes(seed),
+        }
     }
 
     /// Export the seed. Caller is responsible for wiping the result.
@@ -160,9 +164,22 @@ pub fn cert_fingerprint(der: &[u8]) -> [u8; 32] {
 /// order. We sort them so neither side has to agree on who goes first, and mix
 /// in both nonces so a recorded session cannot be replayed at a user.
 #[must_use]
-pub fn sas_code(cert_a: &[u8; 32], cert_b: &[u8; 32], nonce_a: &[u8; 32], nonce_b: &[u8; 32]) -> u32 {
-    let (lo, hi) = if cert_a <= cert_b { (cert_a, cert_b) } else { (cert_b, cert_a) };
-    let (nlo, nhi) = if nonce_a <= nonce_b { (nonce_a, nonce_b) } else { (nonce_b, nonce_a) };
+pub fn sas_code(
+    cert_a: &[u8; 32],
+    cert_b: &[u8; 32],
+    nonce_a: &[u8; 32],
+    nonce_b: &[u8; 32],
+) -> u32 {
+    let (lo, hi) = if cert_a <= cert_b {
+        (cert_a, cert_b)
+    } else {
+        (cert_b, cert_a)
+    };
+    let (nlo, nhi) = if nonce_a <= nonce_b {
+        (nonce_a, nonce_b)
+    } else {
+        (nonce_b, nonce_a)
+    };
 
     let mut hasher = blake3::Hasher::new();
     hasher.update(b"zenshare-sas-v1");

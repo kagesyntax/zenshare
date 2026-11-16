@@ -1,4 +1,4 @@
-//! ZenShare entry point.
+//! `ZenShare` entry point.
 
 mod engine;
 
@@ -11,7 +11,11 @@ use zs_transfer::{Progress, SendItem};
 use zs_ui::UiModel;
 
 #[derive(Parser, Debug)]
-#[command(name = "zenshare", version, about = "Fast, private, cross-platform file transfer")]
+#[command(
+    name = "zenshare",
+    version,
+    about = "Fast, private, cross-platform file transfer"
+)]
 struct Cli {
     /// Use a separate identity and settings profile. Handy for testing two
     /// devices on one machine.
@@ -40,7 +44,7 @@ enum Command {
     Gui,
     /// Check the environment and report what is available.
     Doctor,
-    /// Send files to a running ZenShare without opening a window.
+    /// Send files to a running `ZenShare` without opening a window.
     Send {
         /// Files to send.
         paths: Vec<PathBuf>,
@@ -84,7 +88,11 @@ fn main() -> Result<()> {
 }
 
 fn gui(profile: &str, bind: &str, on_top: bool, demo: bool) -> Result<()> {
-    let initial = if demo { UiModel::demo() } else { UiModel::default() };
+    let initial = if demo {
+        UiModel::demo()
+    } else {
+        UiModel::default()
+    };
     let model = Arc::new(RwLock::new(initial));
     let (tx, rx) = async_channel::unbounded();
 
@@ -100,12 +108,19 @@ fn gui(profile: &str, bind: &str, on_top: bool, demo: bool) -> Result<()> {
 fn doctor(profile: &str) -> Result<()> {
     println!("zenshare {}", env!("CARGO_PKG_VERSION"));
     println!("  protocol      v{}", zs_transfer::version());
-    println!("  chunk size    {}", bytesize::ByteSize(u64::from(zs_core::DEFAULT_CHUNK_SIZE)));
+    println!(
+        "  chunk size    {}",
+        bytesize::ByteSize(u64::from(zs_core::DEFAULT_CHUNK_SIZE))
+    );
     println!("  streams       {}", zs_transfer::PARALLEL_STREAMS);
 
     let path = engine::identity_path(profile)?;
     let identity = zs_crypto::load_or_create(&path)?;
-    println!("  identity      {}  ({})", identity.device_id(), path.display());
+    println!(
+        "  identity      {}  ({})",
+        identity.device_id(),
+        path.display()
+    );
     println!("  downloads     {}", engine::downloads_dir().display());
 
     let ips = zs_net::local_ips();
@@ -126,7 +141,10 @@ fn doctor(profile: &str) -> Result<()> {
 
 async fn send_files(paths: Vec<PathBuf>, to: &str) -> Result<()> {
     let addr: std::net::SocketAddr = to.parse().context("--to must be ip:port")?;
-    let items: Vec<SendItem> = paths.iter().filter_map(|p| SendItem::from_path(p).ok()).collect();
+    let items: Vec<SendItem> = paths
+        .iter()
+        .filter_map(|p| SendItem::from_path(p).ok())
+        .collect();
     if items.is_empty() {
         anyhow::bail!("no readable files given");
     }
@@ -137,7 +155,10 @@ async fn send_files(paths: Vec<PathBuf>, to: &str) -> Result<()> {
     let report = zs_transfer::send(&conn, items, Arc::new(|p: Progress| draw_progress(&p))).await?;
     println!();
     println!("sent           {}", bytesize::ByteSize(report.bytes));
-    println!("throughput     {:.1} MiB/s", report.bytes_per_sec() / (1024.0 * 1024.0));
+    println!(
+        "throughput     {:.1} MiB/s",
+        report.bytes_per_sec() / (1024.0 * 1024.0)
+    );
     conn.close(0u32.into(), b"done");
     Ok(())
 }
@@ -166,7 +187,11 @@ async fn selftest(size_mb: u64, keep: bool) -> Result<()> {
 
     let dst_for_task = dst_dir.clone();
     let server = tokio::spawn(async move {
-        let incoming = listener.endpoint.accept().await.context("no incoming connection")?;
+        let incoming = listener
+            .endpoint
+            .accept()
+            .await
+            .context("no incoming connection")?;
         let conn = incoming.await.context("accept handshake")?;
         zs_transfer::recv(&conn, &dst_for_task, Arc::new(|_p: Progress| {})).await
     });
@@ -174,7 +199,8 @@ async fn selftest(size_mb: u64, keep: bool) -> Result<()> {
     let conn = zs_net::connect("0.0.0.0:0".parse()?, addr, None).await?;
 
     let started = Instant::now();
-    let sent = zs_transfer::send(&conn, vec![item], Arc::new(|p: Progress| draw_progress(&p))).await?;
+    let sent =
+        zs_transfer::send(&conn, vec![item], Arc::new(|p: Progress| draw_progress(&p))).await?;
     let received = server.await.context("receiver task panicked")??;
     let elapsed = started.elapsed();
 
@@ -187,7 +213,11 @@ async fn selftest(size_mb: u64, keep: bool) -> Result<()> {
         anyhow::bail!("INTEGRITY FAILURE — hashes differ");
     }
     if received.bytes != total || sent.bytes != total {
-        anyhow::bail!("byte count mismatch: sent {} recv {} expected {total}", sent.bytes, received.bytes);
+        anyhow::bail!(
+            "byte count mismatch: sent {} recv {} expected {total}",
+            sent.bytes,
+            received.bytes
+        );
     }
 
     let mbps = total as f64 / elapsed.as_secs_f64() / (1024.0 * 1024.0);
@@ -196,10 +226,10 @@ async fn selftest(size_mb: u64, keep: bool) -> Result<()> {
     println!("elapsed        {}", humantime::format_duration(elapsed));
     println!("throughput     {mbps:.1} MiB/s");
 
-    if !keep {
-        let _ = std::fs::remove_dir_all(&root);
-    } else {
+    if keep {
         println!("kept           {}", root.display());
+    } else {
+        let _ = std::fs::remove_dir_all(&root);
     }
     Ok(())
 }
@@ -207,7 +237,10 @@ async fn selftest(size_mb: u64, keep: bool) -> Result<()> {
 fn draw_progress(p: &Progress) {
     let pct = p.fraction() * 100.0;
     let mib = p.bytes_per_sec() / (1024.0 * 1024.0);
-    eprint!("\r  {pct:5.1}%  {mib:>7.1} MiB/s  {}/{} chunks   ", p.chunks_done, p.chunks_total);
+    eprint!(
+        "\r  {pct:5.1}%  {mib:>7.1} MiB/s  {}/{} chunks   ",
+        p.chunks_done, p.chunks_total
+    );
 }
 
 fn write_payload(path: &Path, size: u64) -> Result<()> {

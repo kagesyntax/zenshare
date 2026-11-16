@@ -16,7 +16,7 @@ pub const fn chunk_count(size: u64, chunk_size: u32) -> u32 {
         return 0;
     }
     let c = chunk_size as u64;
-    ((size + c - 1) / c) as u32
+    size.div_ceil(c) as u32
 }
 
 /// Byte range of chunk `index` within a file of `size` bytes.
@@ -29,7 +29,11 @@ pub const fn chunk_range(index: u32, size: u64, chunk_size: u32) -> Option<(u64,
     if start >= size {
         return None;
     }
-    let end = if start + chunk_size as u64 > size { size } else { start + chunk_size as u64 };
+    let end = if start + chunk_size as u64 > size {
+        size
+    } else {
+        start + chunk_size as u64
+    };
     Some((start, end))
 }
 

@@ -45,15 +45,15 @@ pub fn downloads_dir() -> PathBuf {
 }
 
 fn hostname() -> String {
-    if let Ok(h) = std::env::var("HOSTNAME") {
-        if !h.trim().is_empty() {
-            return h.trim_end_matches(".local").to_string();
-        }
+    if let Ok(h) = std::env::var("HOSTNAME")
+        && !h.trim().is_empty()
+    {
+        return h.trim_end_matches(".local").to_string();
     }
-    if let Ok(h) = std::env::var("COMPUTERNAME") {
-        if !h.trim().is_empty() {
-            return h;
-        }
+    if let Ok(h) = std::env::var("COMPUTERNAME")
+        && !h.trim().is_empty()
+    {
+        return h;
     }
     match std::env::var("USER") {
         Ok(u) if !u.is_empty() => format!("{u}'s device"),
@@ -71,7 +71,10 @@ pub fn spawn(
     std::thread::Builder::new()
         .name("zs-engine".to_string())
         .spawn(move || {
-            let rt = match tokio::runtime::Builder::new_multi_thread().enable_all().build() {
+            let rt = match tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+            {
                 Ok(rt) => rt,
                 Err(e) => {
                     tracing::error!("runtime: {e}");
@@ -104,7 +107,9 @@ async fn run(
     };
 
     {
-        let mut m = model.write().map_err(|_| anyhow::anyhow!("model poisoned"))?;
+        let mut m = model
+            .write()
+            .map_err(|_| anyhow::anyhow!("model poisoned"))?;
         m.my_name.clone_from(&device.name);
         m.my_id = device.id.short();
         m.port = port;
@@ -113,7 +118,7 @@ async fn run(
 
     // Discovery is best-effort. A machine with multicast disabled still runs;
     // it just cannot see peers until they are addressed directly.
-    let mut announces = match zs_net::beacon::spawn(device.clone(), port) {
+    let mut announces = match zs_net::beacon::spawn(&device, port) {
         Ok(rx) => Some(rx),
         Err(e) => {
             tracing::warn!("discovery unavailable: {e}");
@@ -140,7 +145,7 @@ async fn run(
                 }
             } => {
                 match heard {
-                    Some(heard) => on_heard(&model, &mut peers, heard),
+                    Some(heard) => on_heard(&model, &mut peers, &heard),
                     None => break,
                 }
             }
@@ -158,7 +163,11 @@ async fn run(
     Ok(())
 }
 
-fn on_heard(model: &Arc<RwLock<UiModel>>, peers: &mut HashMap<DeviceId, (SocketAddr, Instant)>, heard: zs_net::beacon::Heard) {
+fn on_heard(
+    model: &Arc<RwLock<UiModel>>,
+    peers: &mut HashMap<DeviceId, (SocketAddr, Instant)>,
+    heard: &zs_net::beacon::Heard,
+) {
     let id = heard.announce.device.id;
     peers.insert(id, (heard.quic_addr, Instant::now()));
 
@@ -177,9 +186,12 @@ fn on_heard(model: &Arc<RwLock<UiModel>>, peers: &mut HashMap<DeviceId, (SocketA
             online: true,
         });
     }
-    m.peers.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    m.peers.sort_by_key(|a| a.name.to_lowercase());
     let n = m.peers.len();
-    m.status = format!("{n} device{} nearby  ·  encrypted  ·  no account", if n == 1 { "" } else { "s" });
+    m.status = format!(
+        "{n} device{} nearby  ·  encrypted  ·  no account",
+        if n == 1 { "" } else { "s" }
+    );
 }
 
 fn prune(model: &Arc<RwLock<UiModel>>, peers: &mut HashMap<DeviceId, (SocketAddr, Instant)>) {
@@ -200,7 +212,11 @@ fn prune(model: &Arc<RwLock<UiModel>>, peers: &mut HashMap<DeviceId, (SocketAddr
     }
 }
 
-fn handle_action(model: &Arc<RwLock<UiModel>>, peers: &HashMap<DeviceId, (SocketAddr, Instant)>, action: UiAction) {
+fn handle_action(
+    model: &Arc<RwLock<UiModel>>,
+    peers: &HashMap<DeviceId, (SocketAddr, Instant)>,
+    action: UiAction,
+) {
     match action {
         UiAction::Send { peer, files } => {
             let Some((addr, _)) = peers.get(&peer).copied() else {
@@ -210,7 +226,12 @@ fn handle_action(model: &Arc<RwLock<UiModel>>, peers: &HashMap<DeviceId, (Socket
             let peer_name = model
                 .read()
                 .ok()
-                .and_then(|m| m.peers.iter().find(|p| p.id == peer).map(|p| p.name.clone()))
+                .and_then(|m| {
+                    m.peers
+                        .iter()
+                        .find(|p| p.id == peer)
+                        .map(|p| p.name.clone())
+                })
                 .unwrap_or_else(|| "device".to_string());
             let model = Arc::clone(model);
             tokio::spawn(async move {
@@ -239,7 +260,10 @@ async fn do_send(
     files: Vec<PathBuf>,
 ) -> Result<()> {
     let id = next_id();
-    let items: Vec<SendItem> = files.iter().filter_map(|p| SendItem::from_path(p).ok()).collect();
+    let items: Vec<SendItem> = files
+        .iter()
+        .filter_map(|p| SendItem::from_path(p).ok())
+        .collect();
     if items.is_empty() {
         set_status(&model, "nothing to send");
         return Ok(());
@@ -251,15 +275,18 @@ async fn do_send(
         format!("{} files", items.len())
     };
 
-    add_row(&model, TransferRow {
-        id: id.clone(),
-        peer: peer_name,
-        file: label,
-        bytes_done: 0,
-        total,
-        speed_bps: 0.0,
-        state: TransferState::Pending,
-    });
+    add_row(
+        &model,
+        TransferRow {
+            id: id.clone(),
+            peer: peer_name,
+            file: label,
+            bytes_done: 0,
+            total,
+            speed_bps: 0.0,
+            state: TransferState::Pending,
+        },
+    );
 
     let bind = SocketAddr::from((Ipv4Addr::UNSPECIFIED, 0));
     let conn = match zs_net::connect(bind, addr, None).await {
@@ -275,7 +302,13 @@ async fn do_send(
         Ok(report) => {
             let mib = report.bytes_per_sec() / (1024.0 * 1024.0);
             finish_row(&model, &id, TransferState::Done);
-            set_status(&model, &format!("sent {} at {mib:.0} MB/s", zs_ui::widgets::fmt_bytes(report.bytes)));
+            set_status(
+                &model,
+                &format!(
+                    "sent {} at {mib:.0} MB/s",
+                    zs_ui::widgets::fmt_bytes(report.bytes)
+                ),
+            );
             conn.close(0u32.into(), b"done");
         }
         Err(e) => {
@@ -298,15 +331,18 @@ fn spawn_receive(model: &Arc<RwLock<UiModel>>, incoming: quinn::Incoming) {
         let id = next_id();
         let peer = conn.remote_address().ip().to_string();
 
-        add_row(&model, TransferRow {
-            id: id.clone(),
-            peer,
-            file: "incoming transfer".to_string(),
-            bytes_done: 0,
-            total: 0,
-            speed_bps: 0.0,
-            state: TransferState::Pending,
-        });
+        add_row(
+            &model,
+            TransferRow {
+                id: id.clone(),
+                peer,
+                file: "incoming transfer".to_string(),
+                bytes_done: 0,
+                total: 0,
+                speed_bps: 0.0,
+                state: TransferState::Pending,
+            },
+        );
 
         let dest = downloads_dir();
         let _ = std::fs::create_dir_all(&dest);
@@ -317,7 +353,10 @@ fn spawn_receive(model: &Arc<RwLock<UiModel>>, incoming: quinn::Incoming) {
                 finish_row(&model, &id, TransferState::Done);
                 set_status(
                     &model,
-                    &format!("received {} into Downloads", zs_ui::widgets::fmt_bytes(report.bytes)),
+                    &format!(
+                        "received {} into Downloads",
+                        zs_ui::widgets::fmt_bytes(report.bytes)
+                    ),
                 );
             }
             Err(e) => fail_row(&model, &id, &format!("{e}")),
@@ -327,15 +366,15 @@ fn spawn_receive(model: &Arc<RwLock<UiModel>>, incoming: quinn::Incoming) {
 
 fn progress_hook(model: Arc<RwLock<UiModel>>, id: String) -> Arc<dyn Fn(Progress) + Send + Sync> {
     Arc::new(move |p: Progress| {
-        if let Ok(mut m) = model.write() {
-            if let Some(row) = m.transfers.iter_mut().find(|t| t.id == id) {
-                row.bytes_done = p.bytes_done;
-                if p.total > 0 {
-                    row.total = p.total;
-                }
-                row.speed_bps = p.bytes_per_sec();
-                row.state = TransferState::Active;
+        if let Ok(mut m) = model.write()
+            && let Some(row) = m.transfers.iter_mut().find(|t| t.id == id)
+        {
+            row.bytes_done = p.bytes_done;
+            if p.total > 0 {
+                row.total = p.total;
             }
+            row.speed_bps = p.bytes_per_sec();
+            row.state = TransferState::Active;
         }
     })
 }
@@ -348,12 +387,12 @@ fn add_row(model: &Arc<RwLock<UiModel>>, row: TransferRow) {
 }
 
 fn finish_row(model: &Arc<RwLock<UiModel>>, id: &str, state: TransferState) {
-    if let Ok(mut m) = model.write() {
-        if let Some(row) = m.transfers.iter_mut().find(|t| t.id == id) {
-            row.state = state;
-            row.bytes_done = row.total;
-            row.speed_bps = 0.0;
-        }
+    if let Ok(mut m) = model.write()
+        && let Some(row) = m.transfers.iter_mut().find(|t| t.id == id)
+    {
+        row.state = state;
+        row.bytes_done = row.total;
+        row.speed_bps = 0.0;
     }
 }
 

@@ -12,7 +12,10 @@ impl DeviceId {
     /// show in the UI; not a security boundary.
     #[must_use]
     pub fn short(&self) -> String {
-        format!("{:02x}{:02x}-{:02x}{:02x}", self.0[0], self.0[1], self.0[2], self.0[3])
+        format!(
+            "{:02x}{:02x}-{:02x}{:02x}",
+            self.0[0], self.0[1], self.0[2], self.0[3]
+        )
     }
 }
 
@@ -80,6 +83,11 @@ impl DeviceInfo {
     #[must_use]
     pub fn local(id: DeviceId, name: impl Into<String>) -> Self {
         let platform = format!("{} {}", std::env::consts::OS, std::env::consts::ARCH);
-        Self { id, name: name.into(), kind: DeviceKind::guess(std::env::consts::OS), platform }
+        Self {
+            id,
+            name: name.into(),
+            kind: DeviceKind::guess(std::env::consts::OS),
+            platform,
+        }
     }
 }

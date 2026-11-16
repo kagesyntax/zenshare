@@ -62,15 +62,21 @@ impl SendItem {
         if !meta.is_file() {
             bail!("{} is not a regular file", abs.display());
         }
-        let name = abs
-            .file_name()
-            .map_or_else(|| "unnamed".to_string(), |n| n.to_string_lossy().into_owned());
+        let name = abs.file_name().map_or_else(
+            || "unnamed".to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        );
         let mtime_ms = meta
             .modified()
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map_or(0, |d| d.as_millis() as i64);
-        Ok(Self { rel: name, abs, size: meta.len(), mtime_ms })
+        Ok(Self {
+            rel: name,
+            abs,
+            size: meta.len(),
+            mtime_ms,
+        })
     }
 }
 
@@ -93,7 +99,11 @@ impl Progress {
     /// Bytes per second, smoothed over the whole transfer.
     #[must_use]
     pub fn bytes_per_sec(&self) -> f64 {
-        if self.elapsed_secs <= 0.0 { 0.0 } else { self.bytes_done as f64 / self.elapsed_secs }
+        if self.elapsed_secs <= 0.0 {
+            0.0
+        } else {
+            self.bytes_done as f64 / self.elapsed_secs
+        }
     }
 
     /// Completion in `0.0..=1.0`.
@@ -147,7 +157,9 @@ fn decode_header(b: &[u8; HEADER_LEN]) -> ChunkHeader {
 
 async fn write_msg(send: &mut quinn::SendStream, msg: &Control) -> Result<()> {
     let body = postcard::to_stdvec(msg).context("encode control frame")?;
-    send.write_all(&(body.len() as u32).to_be_bytes()).await.context("write frame len")?;
+    send.write_all(&(body.len() as u32).to_be_bytes())
+        .await
+        .context("write frame len")?;
     send.write_all(&body).await.context("write frame body")?;
     Ok(())
 }
@@ -160,12 +172,16 @@ async fn read_msg(recv: &mut quinn::RecvStream) -> Result<Control> {
         bail!("control frame of {n} bytes exceeds limit");
     }
     let mut buf = vec![0u8; n];
-    read_exact(recv, &mut buf).await.context("read frame body")?;
+    read_exact(recv, &mut buf)
+        .await
+        .context("read frame body")?;
     postcard::from_bytes(&buf).context("decode control frame")
 }
 
 async fn read_exact(recv: &mut quinn::RecvStream, buf: &mut [u8]) -> Result<()> {
-    recv.read_exact(buf).await.map_err(|e| anyhow::anyhow!("read: {e}"))?;
+    recv.read_exact(buf)
+        .await
+        .map_err(|e| anyhow::anyhow!("read: {e}"))?;
     Ok(())
 }
 
@@ -173,6 +189,8 @@ async fn read_exact(recv: &mut quinn::RecvStream, buf: &mut [u8]) -> Result<()> 
 ///
 /// The sender drives the control stream; `progress` is called from multiple
 /// tasks and must be cheap and thread-safe.
+// Same reasoning as `recv`: one linear protocol conversation.
+#[allow(clippy::too_many_lines)]
 pub async fn send(
     conn: &quinn::Connection,
     items: Vec<SendItem>,
@@ -183,20 +201,31 @@ pub async fn send(
 
     let files: Vec<FileEntry> = items
         .iter()
-        .map(|i| FileEntry { path: i.rel.clone(), size: i.size, mtime_ms: i.mtime_ms })
+        .map(|i| FileEntry {
+            path: i.rel.clone(),
+            size: i.size,
+            mtime_ms: i.mtime_ms,
+        })
         .collect();
     let total_bytes: u64 = items.iter().map(|i| i.size).sum();
 
     let mut transfer_id = [0u8; 16];
     getrandom::fill(&mut transfer_id).map_err(|_| anyhow::anyhow!("entropy"))?;
 
-    let manifest = Manifest { transfer_id, files, chunk_size, total_bytes };
+    let manifest = Manifest {
+        transfer_id,
+        files,
+        chunk_size,
+        total_bytes,
+    };
     let chunks_total = manifest.total_chunks();
 
     let (mut ctrl_send, mut ctrl_recv) = conn.open_bi().await.context("open control stream")?;
     write_msg(
         &mut ctrl_send,
-        &Control::Offer { manifest: manifest.clone() },
+        &Control::Offer {
+            manifest: manifest.clone(),
+        },
     )
     .await?;
 
@@ -254,7 +283,9 @@ pub async fn send(
                 };
 
                 let mut s = conn.open_uni().await.context("open data stream")?;
-                s.write_all(&encode_header(&header)).await.context("write chunk header")?;
+                s.write_all(&encode_header(&header))
+                    .await
+                    .context("write chunk header")?;
                 s.write_all(payload).await.context("write chunk body")?;
                 s.finish().context("finish chunk stream")?;
 
@@ -290,10 +321,16 @@ pub async fn send(
     // endpoint without truncating the last frame.
     conn.close(0u32.into(), b"done");
 
-    Ok(Report { bytes: sent, elapsed: started.elapsed() })
+    Ok(Report {
+        bytes: sent,
+        elapsed: started.elapsed(),
+    })
 }
 
 /// Receive an offer and write the files into `dest`.
+// One linear protocol conversation: offer, accept, chunks, commit, ack. Splitting
+// it across helpers would thread six pieces of state through them for no gain.
+#[allow(clippy::too_many_lines)]
 pub async fn recv(
     conn: &quinn::Connection,
     dest: &Path,
@@ -308,7 +345,13 @@ pub async fn recv(
     };
 
     if manifest.chunk_size == 0 || manifest.chunk_size > 64 * 1024 * 1024 {
-        write_msg(&mut ctrl_send, &Control::Reject { reason: "bad chunk size".into() }).await?;
+        write_msg(
+            &mut ctrl_send,
+            &Control::Reject {
+                reason: "bad chunk size".into(),
+            },
+        )
+        .await?;
         bail!("peer offered an absurd chunk size");
     }
 
@@ -342,10 +385,7 @@ pub async fn recv(
         });
     }
 
-    let have: Vec<Vec<u8>> = targets
-        .iter()
-        .map(|t| bitmap::empty(t.chunks))
-        .collect();
+    let have: Vec<Vec<u8>> = targets.iter().map(|t| bitmap::empty(t.chunks)).collect();
     write_msg(&mut ctrl_send, &Control::Accept { have }).await?;
 
     let done_bytes = Arc::new(AtomicU64::new(0));
@@ -425,7 +465,9 @@ pub async fn recv(
     if got != u64::from(total_chunks) {
         write_msg(
             &mut ctrl_send,
-            &Control::Error { message: format!("incomplete: {got}/{total_chunks} chunks") },
+            &Control::Error {
+                message: format!("incomplete: {got}/{total_chunks} chunks"),
+            },
         )
         .await?;
         bail!("incomplete transfer: {got}/{total_chunks} chunks");
@@ -438,7 +480,9 @@ pub async fn recv(
 
     // Commit: flush, then atomically move each staging file into place.
     for t in targets.iter() {
-        t.file.sync_all().with_context(|| format!("fsync {}", t.part_path.display()))?;
+        t.file
+            .sync_all()
+            .with_context(|| format!("fsync {}", t.part_path.display()))?;
         std::fs::rename(&t.part_path, &t.final_path)
             .with_context(|| format!("rename into {}", t.final_path.display()))?;
         if let Ok(mtime) = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
@@ -454,7 +498,10 @@ pub async fn recv(
     // close first, with a bound so a vanished peer cannot hang us.
     let _ = tokio::time::timeout(std::time::Duration::from_secs(5), conn.closed()).await;
 
-    Ok(Report { bytes: done_bytes.load(Ordering::Relaxed), elapsed: started.elapsed() })
+    Ok(Report {
+        bytes: done_bytes.load(Ordering::Relaxed),
+        elapsed: started.elapsed(),
+    })
 }
 
 struct Target {
@@ -472,13 +519,38 @@ fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
 }
 
 /// Positioned write, so chunks can land in any order without seeking.
+///
+/// Uses std's per-platform positioned-write rather than a Unix syscall wrapper:
+/// the same code has to build and run on Windows, where `rustix` does not exist.
+#[cfg(unix)]
 fn write_at(file: &std::fs::File, buf: &[u8], offset: u64) -> Result<()> {
+    use std::os::unix::fs::FileExt;
+
     let mut written = 0;
     while written < buf.len() {
-        let n = rustix::io::pwrite(file, &buf[written..], offset + written as u64)
+        let n = file
+            .write_at(&buf[written..], offset + written as u64)
             .map_err(|e| anyhow::anyhow!("pwrite: {e}"))?;
         if n == 0 {
             bail!("pwrite returned 0");
+        }
+        written += n;
+    }
+    Ok(())
+}
+
+/// Positioned write, Windows flavour.
+#[cfg(windows)]
+fn write_at(file: &std::fs::File, buf: &[u8], offset: u64) -> Result<()> {
+    use std::os::windows::fs::FileExt;
+
+    let mut written = 0;
+    while written < buf.len() {
+        let n = file
+            .seek_write(&buf[written..], offset + written as u64)
+            .map_err(|e| anyhow::anyhow!("seek_write: {e}"))?;
+        if n == 0 {
+            bail!("seek_write returned 0");
         }
         written += n;
     }
@@ -527,7 +599,12 @@ mod tests {
 
     #[test]
     fn header_roundtrip() {
-        let h = ChunkHeader { file: 7, index: 12345, len: 4096, hash: [0xAB; 32] };
+        let h = ChunkHeader {
+            file: 7,
+            index: 12345,
+            len: 4096,
+            hash: [0xAB; 32],
+        };
         let d = decode_header(&encode_header(&h));
         assert_eq!(d.file, h.file);
         assert_eq!(d.index, h.index);

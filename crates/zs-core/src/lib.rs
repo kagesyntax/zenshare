@@ -1,4 +1,4 @@
-//! ZenShare core: shared types, wire protocol, chunk arithmetic.
+//! `ZenShare` core: shared types, wire protocol, chunk arithmetic.
 //!
 //! This crate has no I/O and no crypto. It is the vocabulary every other crate speaks.
 
@@ -9,7 +9,7 @@ pub mod device;
 pub mod error;
 pub mod protocol;
 
-pub use chunk::{bitmap, chunk_count, chunk_range, DEFAULT_CHUNK_SIZE};
+pub use chunk::{DEFAULT_CHUNK_SIZE, bitmap, chunk_count, chunk_range};
 pub use device::{DeviceId, DeviceInfo, DeviceKind};
 pub use error::{CoreError, Result};
 pub use protocol::{Control, FileEntry, Manifest, TransferId};

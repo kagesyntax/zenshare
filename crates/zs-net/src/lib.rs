@@ -74,8 +74,8 @@ pub fn listen(addr: SocketAddr) -> Result<Listener> {
         .context("server certificate")?;
     crypto.alpn_protocols = vec![zs_core::ALPN.to_vec()];
 
-    let quic_crypto = quinn::crypto::rustls::QuicServerConfig::try_from(crypto)
-        .context("QUIC server crypto")?;
+    let quic_crypto =
+        quinn::crypto::rustls::QuicServerConfig::try_from(crypto).context("QUIC server crypto")?;
     let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(quic_crypto));
     server_config.transport_config(transport_config()?);
 
@@ -83,7 +83,11 @@ pub fn listen(addr: SocketAddr) -> Result<Listener> {
         .with_context(|| format!("bind QUIC listener on {addr}"))?;
     let local_addr = endpoint.local_addr()?;
 
-    Ok(Listener { endpoint, cert_fingerprint: fingerprint, local_addr })
+    Ok(Listener {
+        endpoint,
+        cert_fingerprint: fingerprint,
+        local_addr,
+    })
 }
 
 /// Connect to a peer, optionally pinning the certificate we expect.
@@ -146,7 +150,9 @@ impl ServerCertVerifier for PinnedVerifier {
         if let Some(expected) = self.expected {
             let actual = zs_crypto::cert_fingerprint(end_entity.as_ref());
             if actual != expected {
-                return Err(rustls::Error::General("certificate fingerprint mismatch".into()));
+                return Err(rustls::Error::General(
+                    "certificate fingerprint mismatch".into(),
+                ));
             }
         }
         Ok(ServerCertVerified::assertion())
@@ -215,8 +221,8 @@ pub fn primary_lan_ip() -> Option<IpAddr> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn listener_binds_and_reports_fingerprint() {
+    #[tokio::test]
+    async fn listener_binds_and_reports_fingerprint() {
         let l = listen("127.0.0.1:0".parse().unwrap()).unwrap();
         assert_ne!(l.cert_fingerprint, [0u8; 32]);
         assert_ne!(l.local_addr.port(), 0);

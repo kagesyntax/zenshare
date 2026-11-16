@@ -67,7 +67,7 @@ pub fn mono(size: f32) -> FontId {
 
 /// Register the embedded typefaces.
 ///
-/// Two files do most of the work: Inter for UI, JetBrains Mono for numbers.
+/// Two files do most of the work: Inter for UI, `JetBrains` Mono for numbers.
 /// Tabular-ish figures in the mono face keep speed readouts from twitching as
 /// digits change, which is the single most noticeable polish detail in a
 /// progress-heavy app.
@@ -79,15 +79,21 @@ pub fn install_fonts(ctx: &egui::Context) {
 
     fonts.font_data.insert(
         "inter-regular".to_owned(),
-        Arc::new(FontData::from_static(include_bytes!("../assets/fonts/Inter-Regular.ttf"))),
+        Arc::new(FontData::from_static(include_bytes!(
+            "../assets/fonts/Inter-Regular.ttf"
+        ))),
     );
     fonts.font_data.insert(
         "inter-medium".to_owned(),
-        Arc::new(FontData::from_static(include_bytes!("../assets/fonts/Inter-Medium.ttf"))),
+        Arc::new(FontData::from_static(include_bytes!(
+            "../assets/fonts/Inter-Medium.ttf"
+        ))),
     );
     fonts.font_data.insert(
         "inter-semibold".to_owned(),
-        Arc::new(FontData::from_static(include_bytes!("../assets/fonts/Inter-SemiBold.ttf"))),
+        Arc::new(FontData::from_static(include_bytes!(
+            "../assets/fonts/Inter-SemiBold.ttf"
+        ))),
     );
     fonts.font_data.insert(
         "jb-mono".to_owned(),
@@ -102,12 +108,14 @@ pub fn install_fonts(ctx: &egui::Context) {
     let monospace = fonts.families.entry(FontFamily::Monospace).or_default();
     monospace.insert(0, "jb-mono".to_owned());
 
-    fonts
-        .families
-        .insert(FontFamily::Name("InterMedium".into()), vec!["inter-medium".to_owned()]);
-    fonts
-        .families
-        .insert(FontFamily::Name("InterSemiBold".into()), vec!["inter-semibold".to_owned()]);
+    fonts.families.insert(
+        FontFamily::Name("InterMedium".into()),
+        vec!["inter-medium".to_owned()],
+    );
+    fonts.families.insert(
+        FontFamily::Name("InterSemiBold".into()),
+        vec!["inter-semibold".to_owned()],
+    );
 
     ctx.set_fonts(fonts);
 }

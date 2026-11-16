@@ -6,7 +6,7 @@ members = ["crates/*"]
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.95"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 
 [workspace.dependencies]
 # ── core ────────────────────────────────────────────────────────────
@@ -38,6 +38,8 @@ rustls           = { version = "0.23", default-features = false, features = ["ri
 rustls-pki-types = "1.16"
 rcgen            = { version = "0.14", default-features = false, features = ["ring", "pem"] }
 socket2          = "0.6"
+# Reserved for the Unix fast path (fadvise, fallocate). Nothing imports it
+# yet: the positioned write uses std so the same code builds on Windows.
 rustix           = { version = "1.1", features = ["fs", "std"] }
 if-addrs         = "0.15"
 

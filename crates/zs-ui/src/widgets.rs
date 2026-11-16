@@ -4,7 +4,9 @@
 //! involved, which is why the app does not look like one.
 
 use crate::theme;
-use egui::{Align2, Color32, CornerRadius, FontId, Painter, Pos2, Rect, Stroke, StrokeKind, Vec2, vec2};
+use egui::{
+    Align2, Color32, CornerRadius, FontId, Painter, Pos2, Rect, Stroke, StrokeKind, Vec2, vec2,
+};
 
 /// Round a rect by `r`.
 #[must_use]
@@ -20,7 +22,12 @@ pub fn card(p: &Painter, rect: Rect, fill: Color32, radius: u8) {
 /// A card with a hairline border.
 pub fn card_bordered(p: &Painter, rect: Rect, fill: Color32, border: Color32, radius: u8) {
     p.rect_filled(rect, cr(radius), fill);
-    p.rect_stroke(rect, cr(radius), Stroke::new(1.0, border), StrokeKind::Inside);
+    p.rect_stroke(
+        rect,
+        cr(radius),
+        Stroke::new(1.0, border),
+        StrokeKind::Inside,
+    );
 }
 
 /// A pill / chip.
@@ -57,7 +64,11 @@ pub fn progress(p: &Painter, rect: Rect, fraction: f32, color: Color32) {
 /// The little identity disc shown for each peer.
 pub fn avatar(p: &Painter, center: Pos2, radius: f32, seed: u32, initials: &str) {
     // Two accents, chosen deterministically so a device keeps its colour.
-    let base = if seed % 2 == 0 { theme::ACCENT } else { theme::ACCENT_ALT };
+    let base = if seed.is_multiple_of(2) {
+        theme::ACCENT
+    } else {
+        theme::ACCENT_ALT
+    };
     p.circle_filled(center, radius, base.gamma_multiply(0.14));
     p.circle_stroke(center, radius, Stroke::new(1.0, base.gamma_multiply(0.35)));
     p.text(
@@ -92,65 +103,173 @@ pub enum Icon {
     Chevron,
 }
 
-/// Draw an icon centred on `c` with a nominal size of `s`.
-pub fn icon(p: &Painter, c: Pos2, s: f32, which: Icon, color: Color32) {
+/// Draw an icon centred on `center` with a nominal size of `size`.
+// One match arm per icon, each a handful of strokes. Splitting it into nine
+// functions would scatter closely-related geometry for no structural gain.
+#[allow(clippy::too_many_lines)]
+pub fn icon(painter: &Painter, center: Pos2, size: f32, which: Icon, color: Color32) {
     let w = Stroke::new(1.7, color);
-    let h = s * 0.5;
+    let h = size * 0.5;
     match which {
         Icon::Send => {
-            p.line_segment([Pos2::new(c.x - h, c.y + h * 0.35), Pos2::new(c.x + h, c.y - h * 0.55)], w);
-            p.line_segment([Pos2::new(c.x + h, c.y - h * 0.55), Pos2::new(c.x + h * 0.15, c.y + h * 0.55)], w);
-            p.line_segment([Pos2::new(c.x + h * 0.15, c.y + h * 0.55), Pos2::new(c.x - h * 0.15, c.y - h * 0.05)], w);
-            p.line_segment([Pos2::new(c.x - h * 0.15, c.y - h * 0.05), Pos2::new(c.x + h, c.y - h * 0.55)], w);
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - h, center.y + h * 0.35),
+                    Pos2::new(center.x + h, center.y - h * 0.55),
+                ],
+                w,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x + h, center.y - h * 0.55),
+                    Pos2::new(center.x + h * 0.15, center.y + h * 0.55),
+                ],
+                w,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x + h * 0.15, center.y + h * 0.55),
+                    Pos2::new(center.x - h * 0.15, center.y - h * 0.05),
+                ],
+                w,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - h * 0.15, center.y - h * 0.05),
+                    Pos2::new(center.x + h, center.y - h * 0.55),
+                ],
+                w,
+            );
         }
         Icon::Receive => {
-            p.line_segment([Pos2::new(c.x, c.y - h), Pos2::new(c.x, c.y + h * 0.3)], w);
-            p.line_segment([Pos2::new(c.x - h * 0.45, c.y - h * 0.15), Pos2::new(c.x, c.y + h * 0.3)], w);
-            p.line_segment([Pos2::new(c.x + h * 0.45, c.y - h * 0.15), Pos2::new(c.x, c.y + h * 0.3)], w);
-            p.line_segment([Pos2::new(c.x - h * 0.7, c.y + h * 0.7), Pos2::new(c.x + h * 0.7, c.y + h * 0.7)], w);
+            painter.line_segment(
+                [
+                    Pos2::new(center.x, center.y - h),
+                    Pos2::new(center.x, center.y + h * 0.3),
+                ],
+                w,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - h * 0.45, center.y - h * 0.15),
+                    Pos2::new(center.x, center.y + h * 0.3),
+                ],
+                w,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x + h * 0.45, center.y - h * 0.15),
+                    Pos2::new(center.x, center.y + h * 0.3),
+                ],
+                w,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - h * 0.7, center.y + h * 0.7),
+                    Pos2::new(center.x + h * 0.7, center.y + h * 0.7),
+                ],
+                w,
+            );
         }
         Icon::History => {
-            p.circle_stroke(c, h * 0.8, w);
-            p.line_segment([c, Pos2::new(c.x, c.y - h * 0.45)], w);
-            p.line_segment([c, Pos2::new(c.x + h * 0.4, c.y + h * 0.15)], w);
+            painter.circle_stroke(center, h * 0.8, w);
+            painter.line_segment([center, Pos2::new(center.x, center.y - h * 0.45)], w);
+            painter.line_segment(
+                [center, Pos2::new(center.x + h * 0.4, center.y + h * 0.15)],
+                w,
+            );
         }
         Icon::Settings => {
-            p.circle_stroke(c, h * 0.42, w);
+            painter.circle_stroke(center, h * 0.42, w);
             for i in 0..8 {
                 let a = std::f32::consts::TAU * (i as f32) / 8.0;
                 let (sn, cs) = a.sin_cos();
-                p.line_segment(
+                painter.line_segment(
                     [
-                        Pos2::new(c.x + cs * h * 0.62, c.y + sn * h * 0.62),
-                        Pos2::new(c.x + cs * h * 0.92, c.y + sn * h * 0.92),
+                        Pos2::new(center.x + cs * h * 0.62, center.y + sn * h * 0.62),
+                        Pos2::new(center.x + cs * h * 0.92, center.y + sn * h * 0.92),
                     ],
                     w,
                 );
             }
         }
         Icon::Plus => {
-            p.line_segment([Pos2::new(c.x - h * 0.7, c.y), Pos2::new(c.x + h * 0.7, c.y)], w);
-            p.line_segment([Pos2::new(c.x, c.y - h * 0.7), Pos2::new(c.x, c.y + h * 0.7)], w);
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - h * 0.7, center.y),
+                    Pos2::new(center.x + h * 0.7, center.y),
+                ],
+                w,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x, center.y - h * 0.7),
+                    Pos2::new(center.x, center.y + h * 0.7),
+                ],
+                w,
+            );
         }
         Icon::Folder => {
-            let r = Rect::from_center_size(Pos2::new(c.x, c.y + h * 0.08), Vec2::new(h * 1.6, h * 1.1));
-            p.rect_stroke(r, cr(2), w, StrokeKind::Inside);
-            p.line_segment(
-                [Pos2::new(r.min.x, r.min.y), Pos2::new(r.min.x + h * 0.55, r.min.y)],
+            let r = Rect::from_center_size(
+                Pos2::new(center.x, center.y + h * 0.08),
+                Vec2::new(h * 1.6, h * 1.1),
+            );
+            painter.rect_stroke(r, cr(2), w, StrokeKind::Inside);
+            painter.line_segment(
+                [
+                    Pos2::new(r.min.x, r.min.y),
+                    Pos2::new(r.min.x + h * 0.55, r.min.y),
+                ],
                 w,
             );
         }
         Icon::Check => {
-            p.line_segment([Pos2::new(c.x - h * 0.55, c.y), Pos2::new(c.x - h * 0.1, c.y + h * 0.45)], w);
-            p.line_segment([Pos2::new(c.x - h * 0.1, c.y + h * 0.45), Pos2::new(c.x + h * 0.6, c.y - h * 0.45)], w);
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - h * 0.55, center.y),
+                    Pos2::new(center.x - h * 0.1, center.y + h * 0.45),
+                ],
+                w,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - h * 0.1, center.y + h * 0.45),
+                    Pos2::new(center.x + h * 0.6, center.y - h * 0.45),
+                ],
+                w,
+            );
         }
         Icon::Close => {
-            p.line_segment([Pos2::new(c.x - h * 0.5, c.y - h * 0.5), Pos2::new(c.x + h * 0.5, c.y + h * 0.5)], w);
-            p.line_segment([Pos2::new(c.x + h * 0.5, c.y - h * 0.5), Pos2::new(c.x - h * 0.5, c.y + h * 0.5)], w);
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - h * 0.5, center.y - h * 0.5),
+                    Pos2::new(center.x + h * 0.5, center.y + h * 0.5),
+                ],
+                w,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x + h * 0.5, center.y - h * 0.5),
+                    Pos2::new(center.x - h * 0.5, center.y + h * 0.5),
+                ],
+                w,
+            );
         }
         Icon::Chevron => {
-            p.line_segment([Pos2::new(c.x - h * 0.25, c.y - h * 0.45), Pos2::new(c.x + h * 0.25, c.y)], w);
-            p.line_segment([Pos2::new(c.x + h * 0.25, c.y), Pos2::new(c.x - h * 0.25, c.y + h * 0.45)], w);
+            painter.line_segment(
+                [
+                    Pos2::new(center.x - h * 0.25, center.y - h * 0.45),
+                    Pos2::new(center.x + h * 0.25, center.y),
+                ],
+                w,
+            );
+            painter.line_segment(
+                [
+                    Pos2::new(center.x + h * 0.25, center.y),
+                    Pos2::new(center.x - h * 0.25, center.y + h * 0.45),
+                ],
+                w,
+            );
         }
     }
 }
@@ -203,7 +322,9 @@ pub fn fmt_eta(secs: f64) -> String {
 /// First letter of the device name, upper-cased.
 #[must_use]
 pub fn initial(name: &str) -> String {
-    name.chars().next().map(|c| c.to_uppercase().to_string()).unwrap_or_else(|| "?".into())
+    name.chars()
+        .next()
+        .map_or_else(|| "?".into(), |c| c.to_uppercase().to_string())
 }
 
 /// Truncate to `max` characters, appending an ellipsis.
