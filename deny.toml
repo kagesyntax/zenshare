@@ -1,0 +1,96 @@
+# Supply-chain policy for ZenShare.
+#
+# This file is the mechanism that turns "pure Rust" from a README claim into a
+# build failure. If someone reaches for rusqlite, zstd-sys or OpenSSL in a hurry,
+# CI stops them with a reason instead of a code review comment.
+#
+# Run: cargo deny check
+
+[graph]
+targets = [
+  { triple = "aarch64-apple-darwin" },
+  { triple = "x86_64-apple-darwin" },
+  { triple = "x86_64-pc-windows-msvc" },
+  { triple = "x86_64-unknown-linux-gnu" },
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+
+deny = [
+  # Webview / app frameworks. The entire point of this project is not being these.
+  { name = "tauri" },
+  { name = "tauri-build" },
+  { name = "wry" },
+  { name = "webview2-com" },
+  { name = "webkit2gtk" },
+
+  # C databases.
+  { name = "rusqlite" },
+  { name = "libsqlite3-sys" },
+  { name = "duckdb" },
+
+  # C compression.
+  { name = "zstd-sys" },
+  { name = "libz-sys" },
+  { name = "bzip2-sys" },
+  { name = "xz2" },
+
+  # C TLS. ring is the single approved exception.
+  { name = "openssl" },
+  { name = "openssl-sys" },
+  { name = "native-tls" },
+
+  # C GUI toolkits.
+  { name = "gtk-sys" },
+  { name = "glib-sys" },
+  { name = "gobject-sys" },
+  { name = "webkit2gtk-sys" },
+
+  # C allocators.
+  { name = "mimalloc" },
+  { name = "mimalloc-sys" },
+  { name = "jemallocator" },
+  { name = "jemalloc-sys" },
+
+  # C crypto outside the approved TLS path.
+  { name = "libsodium-sys" },
+  { name = "sodiumoxide" },
+]
+
+skip = [
+  # Two versions of the same crate that are genuinely split across the objc2
+  # ecosystem during its migration; both are pure Rust.
+  { name = "objc2", version = "=0.5.3" },
+  { name = "block2", version = "=0.5.1" },
+  { name = "objc2-foundation", version = "=0.2.2" },
+  { name = "windows-sys", version = "=0.52.0" },
+]
+
+[licenses]
+allow = [
+  "MIT",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Unicode-3.0",
+  "Unicode-DFS-2016",
+  "Zlib",
+  "MPL-2.0",
+  "OFL-1.1",
+  "CC0-1.0",
+  "Unlicense",
+]
+confidence-threshold = 0.93
+
+[advisories]
+yanked = "deny"
+ignore = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
