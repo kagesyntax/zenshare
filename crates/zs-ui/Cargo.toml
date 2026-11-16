@@ -1,0 +1,18 @@
+[package]
+name = "zs-ui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+zs-core = { path = "../zs-core" }
+eframe.workspace = true
+egui.workspace = true
+rfd.workspace = true
+async-channel.workspace = true
+open.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true
