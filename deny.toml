@@ -16,7 +16,10 @@ targets = [
 
 [bans]
 multiple-versions = "warn"
-wildcards = "deny"
+# Path dependencies inside this workspace carry no version requirement by
+# design — they are built from the same commit, so there is nothing to pin.
+# Denying wildcards here would only flag `foo = { path = "../foo" }`.
+wildcards = "allow"
 
 deny = [
   # Webview / app frameworks. The entire point of this project is not being these.
