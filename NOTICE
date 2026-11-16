@@ -1,0 +1,28 @@
+ZenShare
+Copyright (c) 2026 the ZenShare authors
+Licensed under MIT OR Apache-2.0.
+
+---
+
+Bundled typefaces
+-----------------
+
+This project embeds the following fonts in the binary. Both are licensed under
+the SIL Open Font License, Version 1.1, which permits bundling and redistribution
+provided the license travels with the font.
+
+Inter
+  Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter)
+  License: SIL Open Font License 1.1
+  Files: crates/zs-ui/assets/fonts/Inter-Regular.ttf
+         crates/zs-ui/assets/fonts/Inter-Medium.ttf
+         crates/zs-ui/assets/fonts/Inter-SemiBold.ttf
+
+JetBrains Mono
+  Copyright (c) 2020 The JetBrains Mono Project Authors
+  (https://github.com/JetBrains/JetBrainsMono)
+  License: SIL Open Font License 1.1
+  Files: crates/zs-ui/assets/fonts/JetBrainsMono-Regular.ttf
+
+The full text of the SIL Open Font License 1.1 is available at
+https://openfontlicense.org/open-font-license-official-text/
