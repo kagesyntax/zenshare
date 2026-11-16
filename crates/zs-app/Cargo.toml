@@ -1,0 +1,33 @@
+[package]
+name = "zs-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "zenshare"
+path = "src/main.rs"
+
+[dependencies]
+zs-core = { path = "../zs-core" }
+zs-crypto = { path = "../zs-crypto" }
+zs-net = { path = "../zs-net" }
+zs-transfer = { path = "../zs-transfer" }
+zs-ui = { path = "../zs-ui" }
+quinn.workspace = true
+async-channel.workspace = true
+tokio.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+blake3.workspace = true
+memmap2.workspace = true
+bytesize.workspace = true
+humantime.workspace = true
+directories.workspace = true
+open.workspace = true
+
+[lints]
+workspace = true
