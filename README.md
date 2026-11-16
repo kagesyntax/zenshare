@@ -1,10 +1,28 @@
 # ZenShare
 
+[![CI](https://github.com/kagesyntax/zenshare/actions/workflows/ci.yml/badge.svg)](https://github.com/kagesyntax/zenshare/actions/workflows/ci.yml)
+[![Release](https://github.com/kagesyntax/zenshare/actions/workflows/release.yml/badge.svg)](https://github.com/kagesyntax/zenshare/actions/workflows/release.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-3BE8B0.svg)](LICENSE)
+
 Fast, private, cross-platform file transfer. Pure Rust, no webview, no account,
 no telemetry, no ads.
 
 > Status: early. The transfer engine works and is verified. The UI is wired to it.
-> See [What works](#what-works) for exactly what is and is not done.
+> See [What works](#what-works) for exactly what is and is not done, and
+> [docs/PLATFORMS.md](docs/PLATFORMS.md) for what runs where.
+
+## Download
+
+**[Latest release →](https://github.com/kagesyntax/zenshare/releases/latest)** ·
+**[Download page](https://kagesyntax.github.io/zenshare/)** (auto-detects your OS)
+
+| macOS | Windows | Linux |
+| --- | --- | --- |
+| `macos-universal.zip` — Apple Silicon + Intel | `windows-x86_64.zip` — 10 / 11 | `linux-x86_64.tar.gz`, `linux-aarch64.tar.gz` |
+
+These builds are not signed with a paid certificate, so macOS and Windows will
+warn you on first launch. [docs/PLATFORMS.md](docs/PLATFORMS.md) has the exact
+steps, and says plainly which platforms do not exist yet: Android, iOS, browser.
 
 ![ZenShare in demo mode](docs/screenshot.png)
 
@@ -23,7 +41,7 @@ ZenShare is that tool:
 - **Encrypted by default.** QUIC + TLS 1.3 on every transfer. There is no plaintext mode.
 - **Verified.** BLAKE3 per 4 MiB chunk, checked before the bytes touch disk.
 - **Resumable.** Drop the Wi-Fi at 90% and it picks up from the last chunk, not the start.
-- **Fast.** QUIC with BBR and eight parallel streams, rather than one TCP stream
+- **Fast.** QUIC with BBR and 32 parallel streams, rather than one TCP stream
   that collapses on the first packet loss.
 - **Honest.** No account, no cloud, no analytics. The only packets that leave your
   machine go to the device you chose.
@@ -164,6 +182,6 @@ decisions behind it.
 
 ## License
 
-MIT OR Apache-2.0.
+MIT. See [LICENSE](LICENSE).
 
 Inter and JetBrains Mono are bundled under the SIL Open Font License.
