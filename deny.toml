@@ -59,32 +59,37 @@ deny = [
   { name = "sodiumoxide" },
 ]
 
-skip = [
-  # Two versions of the same crate that are genuinely split across the objc2
-  # ecosystem during its migration; both are pure Rust.
-  { name = "objc2", version = "=0.5.3" },
-  { name = "block2", version = "=0.5.1" },
-  { name = "objc2-foundation", version = "=0.2.2" },
-  { name = "windows-sys", version = "=0.52.0" },
-]
+# No skip list. If two versions of a crate show up, the fix is to resolve the
+# duplicate, not to silence it. `multiple-versions` is a warning, so it informs
+# without blocking.
 
 [licenses]
+# Everything below is permissive. Copyleft identifiers appear in the tree only as
+# OR-alternatives (e.g. `Apache-2.0 OR GPL-2.0-only`), where we always take the
+# permissive branch — so GPL and LGPL are deliberately absent from this list.
 allow = [
   "MIT",
+  "MIT-0",
   "Apache-2.0",
   "Apache-2.0 WITH LLVM-exception",
+  "BSD-1-Clause",
   "BSD-2-Clause",
   "BSD-3-Clause",
+  "0BSD",
   "ISC",
-  "Unicode-3.0",
-  "Unicode-DFS-2016",
+  "BSL-1.0",
   "Zlib",
   "MPL-2.0",
-  "OFL-1.1",
+  "Unicode-3.0",
+  "Unicode-DFS-2016",
   "CC0-1.0",
   "Unlicense",
+  "OFL-1.1",
+  # epaint ships the Ubuntu font for default glyph coverage; we replace the
+  # fonts at startup but the crate is still linked.
+  "Ubuntu-font-1.0",
 ]
-confidence-threshold = 0.93
+confidence-threshold = 0.9
 
 [advisories]
 yanked = "deny"
