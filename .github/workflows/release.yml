@@ -1,0 +1,255 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release, e.g. v0.1.0"
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  prepare:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - id: v
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [ -n "$INPUT_TAG" ]; then TAG="$INPUT_TAG"; else TAG="${GITHUB_REF_NAME}"; fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+  draft:
+    name: Open draft release
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          sed -e "s/{{VERSION}}/${VERSION}/g" -e "s|{{REPO}}|${GITHUB_REPOSITORY}|g" \
+            .github/release-notes.md > /tmp/notes.md
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft \
+            --title "ZenShare ${VERSION}" \
+            --notes-file /tmp/notes.md
+
+  linux:
+    name: Linux x86_64
+    needs: [prepare, draft]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libwayland-dev libx11-dev libxi-dev \
+            libxcursor-dev libxrandr-dev libgl1-mesa-dev pkg-config
+
+      - name: Build
+        run: cargo build --release --locked --target x86_64-unknown-linux-gnu
+
+      - name: Package
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          name="zenshare-${VERSION}-linux-x86_64"
+          mkdir -p "dist/${name}"
+          cp target/x86_64-unknown-linux-gnu/release/zenshare "dist/${name}/"
+          cp README.md LICENSE NOTICE "dist/${name}/"
+          tar -C dist -czf "dist/${name}.tar.gz" "${name}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  linux-arm:
+    name: Linux aarch64
+    needs: [prepare, draft]
+    # GitHub-hosted arm64 runners. Requires a public repository.
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libwayland-dev libx11-dev libxi-dev \
+            libxcursor-dev libxrandr-dev libgl1-mesa-dev pkg-config
+
+      - name: Build
+        run: cargo build --release --locked --target aarch64-unknown-linux-gnu
+
+      - name: Package
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          name="zenshare-${VERSION}-linux-aarch64"
+          mkdir -p "dist/${name}"
+          cp target/aarch64-unknown-linux-gnu/release/zenshare "dist/${name}/"
+          cp README.md LICENSE NOTICE "dist/${name}/"
+          tar -C dist -czf "dist/${name}.tar.gz" "${name}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-aarch64
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  macos:
+    name: macOS universal
+    needs: [prepare, draft]
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build both architectures
+        run: |
+          cargo build --release --locked --target aarch64-apple-darwin
+          cargo build --release --locked --target x86_64-apple-darwin
+
+      - name: Assemble app bundle
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          name="zenshare-${VERSION}-macos-universal"
+          app="dist/ZenShare.app"
+          mkdir -p "${app}/Contents/MacOS" "${app}/Contents/Resources"
+
+          lipo -create \
+            target/aarch64-apple-darwin/release/zenshare \
+            target/x86_64-apple-darwin/release/zenshare \
+            -output "${app}/Contents/MacOS/zenshare"
+
+          cat > "${app}/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key><string>ZenShare</string>
+            <key>CFBundleDisplayName</key><string>ZenShare</string>
+            <key>CFBundleIdentifier</key><string>dev.zenshare.app</string>
+            <key>CFBundleVersion</key><string>${VERSION}</string>
+            <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>CFBundleExecutable</key><string>zenshare</string>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
+            <key>NSHighResolutionCapable</key><true/>
+            <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
+          </dict>
+          </plist>
+          PLIST
+
+          # lipo invalidates the linker's ad-hoc signature, and Apple Silicon
+          # refuses to run an unsigned binary at all. Re-sign ad-hoc.
+          codesign --force --deep --sign - "${app}"
+          codesign --verify --verbose "${app}"
+
+          # Ship the app inside a folder with the licence and the README, so the
+          # zip is self-explanatory once it is unzipped on someone's desktop.
+          pkg="dist/${name}"
+          mkdir -p "${pkg}"
+          mv "${app}" "${pkg}/"
+          cp README.md LICENSE NOTICE "${pkg}/"
+
+          ditto -c -k --keepParent "${pkg}" "dist/${name}.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-universal
+          path: dist/*.zip
+          if-no-files-found: error
+
+  windows:
+    name: Windows x86_64
+    needs: [prepare, draft]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release --locked --target x86_64-pc-windows-msvc
+
+      - name: Package
+        shell: pwsh
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          $name = "zenshare-$env:VERSION-windows-x86_64"
+          New-Item -ItemType Directory -Force -Path "dist/$name" | Out-Null
+          Copy-Item "target/x86_64-pc-windows-msvc/release/zenshare.exe" "dist/$name/"
+          Copy-Item README.md, LICENSE, NOTICE "dist/$name/"
+          Compress-Archive -Path "dist/$name" -DestinationPath "dist/$name.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: dist/*.zip
+          if-no-files-found: error
+
+  publish:
+    name: Checksums and publish
+    needs: [prepare, draft, linux, linux-arm, macos, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Attach to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" dist/* --clobber
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
