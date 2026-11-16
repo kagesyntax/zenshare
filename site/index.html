@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ZenShare — send files without the cloud</title>
+<meta name="description" content="Fast, private file transfer between your devices. Encrypted, verified, no account, no cloud, no ads.">
+<meta property="og:title" content="ZenShare">
+<meta property="og:description" content="Send a file to the device next to you. No account, no upload, no ads.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230A0C0F'/%3E%3Cpath d='M9 21L23 11M23 11L16 12.5M23 11L21.5 18' stroke='%233BE8B0' stroke-width='2.2' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #0A0C0F;
+    --surface: #12151A;
+    --surface-2: #181C23;
+    --border: #242A33;
+    --text: #E9ECF0;
+    --dim: #939CAB;
+    --faint: #5C6675;
+    --accent: #3BE8B0;
+    --alt: #7C8CFF;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 400 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+  .wrap { max-width: 940px; margin: 0 auto; padding: 0 24px; }
+
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 22px 0; border-bottom: 1px solid var(--border);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; letter-spacing: -0.01em; }
+  .mark {
+    width: 30px; height: 30px; border-radius: 9px;
+    background: rgba(59,232,176,.14); border: 1px solid rgba(59,232,176,.32);
+    display: grid; place-items: center;
+  }
+  .mark svg { width: 15px; height: 15px; }
+  header nav a { color: var(--dim); text-decoration: none; font-size: 14px; margin-left: 22px; }
+  header nav a:hover { color: var(--text); }
+
+  .hero { padding: 72px 0 40px; }
+  h1 {
+    font-size: clamp(32px, 5.2vw, 52px);
+    line-height: 1.08; letter-spacing: -0.03em; font-weight: 600;
+    margin: 0 0 18px; max-width: 15ch;
+  }
+  h1 em { font-style: normal; color: var(--accent); }
+  .lede { font-size: 18px; color: var(--dim); max-width: 54ch; margin: 0 0 34px; }
+
+  .cta { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 10px;
+    background: var(--accent); color: #05140F;
+    padding: 13px 22px; border-radius: 12px;
+    font-weight: 600; font-size: 15px; text-decoration: none;
+    transition: transform .12s ease, filter .12s ease;
+  }
+  .btn:hover { filter: brightness(1.08); transform: translateY(-1px); }
+  .btn[aria-disabled="true"] { background: var(--surface-2); color: var(--faint); pointer-events: none; }
+  .btn .sub { font-weight: 400; opacity: .65; font-size: 13px; }
+  .ghost { color: var(--dim); text-decoration: none; font-size: 14px; border-bottom: 1px solid var(--border); padding-bottom: 2px; }
+  .ghost:hover { color: var(--text); border-color: var(--dim); }
+
+  .platforms { margin-top: 46px; border-top: 1px solid var(--border); }
+  .platform {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; padding: 15px 2px; border-bottom: 1px solid var(--border);
+    text-decoration: none;
+  }
+  .platform:hover { background: rgba(255,255,255,.015); }
+  .platform .name { font-size: 15px; }
+  .platform .meta { color: var(--faint); font-size: 13px; margin-left: 10px; }
+  .platform .dl { color: var(--dim); font-size: 13px; white-space: nowrap; }
+  .platform:hover .dl { color: var(--accent); }
+  .platform[data-current="true"] .name::after {
+    content: "your machine"; margin-left: 10px; font-size: 11px; letter-spacing: .04em;
+    text-transform: uppercase; color: var(--accent); opacity: .8;
+  }
+
+  section.features { padding: 64px 0 8px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 18px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; padding: 22px;
+  }
+  .card h3 { margin: 0 0 8px; font-size: 15px; font-weight: 600; }
+  .card p { margin: 0; color: var(--dim); font-size: 14px; }
+  .card .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); display: block; margin-bottom: 16px; }
+  .card.alt .dot { background: var(--alt); }
+
+  .honest {
+    margin: 56px 0; padding: 26px 28px;
+    border: 1px solid var(--border); border-radius: 14px;
+    background: var(--surface);
+  }
+  .honest h2 { margin: 0 0 12px; font-size: 16px; font-weight: 600; }
+  .honest p { margin: 0 0 10px; color: var(--dim); font-size: 14.5px; }
+  .honest p:last-child { margin-bottom: 0; }
+  .honest strong { color: var(--text); font-weight: 500; }
+
+  footer {
+    border-top: 1px solid var(--border); padding: 26px 0 44px;
+    display: flex; flex-wrap: wrap; gap: 14px; justify-content: space-between;
+    color: var(--faint); font-size: 13px;
+  }
+  footer a { color: var(--dim); text-decoration: none; }
+  footer a:hover { color: var(--text); }
+  @media (max-width: 560px) {
+    .hero { padding: 44px 0 24px; }
+    .platform .meta { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="brand">
+      <span class="mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none"><path d="M5 16L19 7M19 7L12.5 8.4M19 7L17.6 13.5" stroke="#3BE8B0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+      ZenShare
+    </div>
+    <nav>
+      <a href="#downloads">Download</a>
+      <a id="repo-link" href="#">Source</a>
+    </nav>
+  </header>
+
+  <main>
+    <div class="hero">
+      <h1>Send a file to the device <em>next to you</em>.</h1>
+      <p class="lede">
+        No account, no upload, no “sign in to continue”. ZenShare talks straight to the
+        other device over the network you are already on — encrypted end to end, and
+        verified chunk by chunk before anything reaches your disk.
+      </p>
+
+      <div class="cta">
+        <a class="btn" id="primary" href="#downloads" aria-disabled="true">
+          <span id="primary-label">Getting the latest release…</span>
+          <span class="sub" id="primary-sub"></span>
+        </a>
+        <a class="ghost" href="#downloads">All platforms</a>
+      </div>
+    </div>
+
+    <div class="platforms" id="downloads">
+      <a class="platform" data-os="macos" href="#">
+        <span><span class="name">macOS</span><span class="meta">Apple Silicon and Intel, one file</span></span>
+        <span class="dl">Download .zip</span>
+      </a>
+      <a class="platform" data-os="windows" href="#">
+        <span><span class="name">Windows</span><span class="meta">10 and 11, 64-bit</span></span>
+        <span class="dl">Download .zip</span>
+      </a>
+      <a class="platform" data-os="linux" href="#">
+        <span><span class="name">Linux</span><span class="meta">64-bit Intel or AMD</span></span>
+        <span class="dl">Download .tar.gz</span>
+      </a>
+      <a class="platform" data-os="linux-arm" href="#">
+        <span><span class="name">Linux ARM</span><span class="meta">Raspberry Pi and friends</span></span>
+        <span class="dl">Download .tar.gz</span>
+      </a>
+    </div>
+
+    <section class="features">
+      <div class="grid">
+        <div class="card">
+          <span class="dot"></span>
+          <h3>Encrypted, not “encrypted”</h3>
+          <p>QUIC with TLS 1.3 on every transfer. There is no plaintext mode to accidentally leave on.</p>
+        </div>
+        <div class="card">
+          <span class="dot"></span>
+          <h3>Verified before it lands</h3>
+          <p>Every 4 MiB chunk carries a BLAKE3 hash. A corrupt chunk is refused, not written.</p>
+        </div>
+        <div class="card alt">
+          <span class="dot"></span>
+          <h3>Nothing in the middle</h3>
+          <p>No server, no account, no analytics. The only packets that leave your machine go to the device you picked.</p>
+        </div>
+      </div>
+    </section>
+
+    <div class="honest">
+      <h2>What does not work yet</h2>
+      <p>
+        <strong>No Android or iOS build.</strong> The desktop app is the part that exists.
+        A phone build needs an Android entry point, a Gradle wrapper and a multicast lock —
+        it is a port, not a checkbox. Shipping an APK that crashes on launch would waste
+        your time, so there is not one here.
+      </p>
+      <p>
+        <strong>No browser version, and there cannot be one.</strong> Browsers cannot open a
+        raw UDP socket, and QUIC needs one. A web app would require a relay server in the
+        middle, which is the exact thing this project exists to avoid.
+      </p>
+      <p>
+        <strong>The six-digit pairing screen is not wired up.</strong> Transfers are encrypted,
+        but first contact with a stranger on a shared network is not yet confirmed by a code
+        you compare. Do not use it on public Wi-Fi to send something you would not email.
+      </p>
+      <p>
+        <strong>Discovery can be blocked.</strong> Some guest and corporate networks drop
+        multicast. The app runs; it just will not list the other device.
+      </p>
+    </div>
+  </main>
+
+  <footer>
+    <span>MIT licensed. Built in Rust — no webview, no Electron.</span>
+    <span><a id="repo-link-2" href="#">github.com</a></span>
+  </footer>
+</div>
+
+<script>
+(function () {
+  // Works on a fork too: owner comes from the github.io hostname, repo from the path.
+  var parts = location.hostname.split(".");
+  var owner = parts[0] === "localhost" ? "kagesyntax" : parts[0];
+  var seg = location.pathname.split("/").filter(Boolean)[0];
+  var repo = seg || "zenshare";
+  var base = "https://github.com/" + owner + "/" + repo;
+
+  document.getElementById("repo-link").href = base;
+  document.getElementById("repo-link-2").href = base;
+  document.getElementById("repo-link-2").textContent = owner + "/" + repo;
+
+  var ua = navigator.userAgent.toLowerCase();
+  var os = ua.indexOf("win") > -1 ? "windows"
+         : ua.indexOf("mac") > -1 ? "macos"
+         : ua.indexOf("linux") > -1 ? "linux" : null;
+  var isArm = /arm|aarch64/.test(ua);
+
+  var current = os === "linux" && isArm ? "linux-arm" : os;
+  var labels = { macos: "macOS", windows: "Windows", linux: "Linux", "linux-arm": "Linux ARM" };
+
+  if (current) {
+    var row = document.querySelector('.platform[data-os="' + current + '"]');
+    if (row) row.dataset.current = "true";
+  }
+
+  function assetFor(tag, which) {
+    var v = tag.replace(/^v/, "");
+    var name = "zenshare-" + v;
+    switch (which) {
+      case "macos":     return name + "-macos-universal.zip";
+      case "windows":   return name + "-windows-x86_64.zip";
+      case "linux":     return name + "-linux-x86_64.tar.gz";
+      case "linux-arm": return name + "-linux-aarch64.tar.gz";
+    }
+  }
+
+  fetch("https://api.github.com/repos/" + owner + "/" + repo + "/releases/latest", {
+    headers: { Accept: "application/vnd.github+json" }
+  })
+    .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(function (rel) {
+      var tag = rel.tag_name;
+      document.querySelectorAll(".platform").forEach(function (row) {
+        var f = assetFor(tag, row.dataset.os);
+        row.href = base + "/releases/download/" + tag + "/" + f;
+      });
+
+      var primary = document.getElementById("primary");
+      var label = document.getElementById("primary-label");
+      var sub = document.getElementById("primary-sub");
+
+      if (current) {
+        primary.href = base + "/releases/download/" + tag + "/" + assetFor(tag, current);
+        primary.setAttribute("aria-disabled", "false");
+        label.textContent = "Download for " + labels[current];
+        sub.textContent = tag;
+      } else {
+        primary.href = base + "/releases/latest";
+        primary.setAttribute("aria-disabled", "false");
+        label.textContent = "Choose your platform";
+        sub.textContent = tag;
+      }
+    })
+    .catch(function () {
+      // No release yet, or the API is rate limited. Point at the releases page,
+      // which always exists.
+      document.querySelectorAll(".platform").forEach(function (row) {
+        row.href = base + "/releases/latest";
+      });
+      var primary = document.getElementById("primary");
+      primary.href = base + "/releases/latest";
+      primary.setAttribute("aria-disabled", "false");
+      document.getElementById("primary-label").textContent = "See all releases";
+      document.getElementById("primary-sub").textContent = "";
+    });
+})();
+</script>
+</body>
+</html>
