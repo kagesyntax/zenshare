@@ -1,0 +1,25 @@
+[package]
+name = "zs-net"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+zs-core = { path = "../zs-core" }
+zs-crypto = { path = "../zs-crypto" }
+quinn.workspace = true
+rustls.workspace = true
+rustls-pki-types.workspace = true
+rcgen.workspace = true
+tokio.workspace = true
+socket2.workspace = true
+if-addrs.workspace = true
+tracing.workspace = true
+blake3.workspace = true
+serde.workspace = true
+postcard.workspace = true
+anyhow.workspace = true
+
+[lints]
+workspace = true
