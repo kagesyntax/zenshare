@@ -1,0 +1,92 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+# ── core ────────────────────────────────────────────────────────────
+serde        = { version = "1.0", features = ["derive"] }
+postcard     = { version = "1.1", features = ["use-std"] }
+thiserror    = "2.0"
+uuid         = { version = "1.29", features = ["v7"] }
+tracing      = "0.1"
+
+# ── crypto ──────────────────────────────────────────────────────────
+blake3        = { version = "1.8", features = ["rayon"] }
+ed25519-dalek = { version = "3.0", features = ["zeroize"] }
+zeroize       = { version = "1.9", features = ["derive"] }
+getrandom     = "0.4"
+hex           = "0.4"
+subtle        = "2.6"
+
+# ── async ───────────────────────────────────────────────────────────
+tokio       = { version = "1.54", features = ["rt-multi-thread", "fs", "net", "sync", "time", "signal", "io-util", "macros"] }
+futures     = "0.3"
+async-channel = "2.5"
+bytes       = "1.12"
+parking_lot = "0.13"
+rayon       = "1.12"
+
+# ── transport ───────────────────────────────────────────────────────
+quinn            = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring", "log"] }
+rustls           = { version = "0.23", default-features = false, features = ["ring", "std"] }
+rustls-pki-types = "1.16"
+rcgen            = { version = "0.14", default-features = false, features = ["ring", "pem"] }
+socket2          = "0.6"
+rustix           = { version = "1.1", features = ["fs", "std"] }
+if-addrs         = "0.15"
+
+# ── files ───────────────────────────────────────────────────────────
+memmap2               = "0.9"
+sanitize-filename     = "0.6"
+unicode-normalization = "0.1"
+
+# ── storage ─────────────────────────────────────────────────────────
+redb = "4.6"
+
+# ── cli / app ───────────────────────────────────────────────────────
+clap               = { version = "4.6", features = ["derive"] }
+anyhow             = "1.0"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+directories        = "6.0"
+bytesize           = "2.7"
+humantime          = "2.4"
+
+# ── ui ──────────────────────────────────────────────────────────────
+eframe      = { version = "0.37", default-features = false, features = ["accesskit", "clipboard", "default_fonts", "links", "wgpu", "persistence"] }
+egui        = "0.37"
+egui_extras = "0.37"
+egui_dnd    = "0.18"
+egui-notify = "0.24"
+fast_qr     = "0.14"
+rfd         = "0.18"
+open        = "5.4"
+
+[workspace.lints.rust]
+unsafe_code     = "deny"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions  = "allow"
+must_use_candidate       = "allow"
+missing_errors_doc       = "allow"
+missing_panics_doc       = "allow"
+cast_precision_loss      = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss           = "allow"
+
+[profile.release]
+lto           = "fat"
+codegen-units = 1
+strip         = "symbols"
+panic         = "abort"
+
+[profile.dev.package."*"]
+opt-level = 2

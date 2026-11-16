@@ -1,0 +1,7 @@
+/target
+**/*.rs.bk
+.DS_Store
+*.profraw
+
+# Agent scratch space, not part of the project.
+.workbuddy-ai/
