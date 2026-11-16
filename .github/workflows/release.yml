@@ -46,9 +46,16 @@ jobs:
         run: |
           sed -e "s/{{VERSION}}/${VERSION}/g" -e "s|{{REPO}}|${GITHUB_REPOSITORY}|g" \
             .github/release-notes.md > /tmp/notes.md
+
+          # Idempotent: a re-run of this workflow must not die on "release
+          # already exists", which would strand the draft with no assets.
           gh release create "$TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --draft \
+            --title "ZenShare ${VERSION}" \
+            --notes-file /tmp/notes.md \
+          || gh release edit "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
             --title "ZenShare ${VERSION}" \
             --notes-file /tmp/notes.md
 
@@ -128,7 +135,7 @@ jobs:
   macos:
     name: macOS universal
     needs: [prepare, draft]
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
 
