@@ -1,0 +1,18 @@
+[package]
+name = "zs-crypto"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+zs-core = { path = "../zs-core" }
+blake3.workspace = true
+ed25519-dalek.workspace = true
+zeroize.workspace = true
+getrandom.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true
