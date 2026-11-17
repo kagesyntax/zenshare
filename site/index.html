@@ -170,6 +170,10 @@
         <span><span class="name">Linux ARM</span><span class="meta">Raspberry Pi and friends</span></span>
         <span class="dl">Download .tar.gz</span>
       </a>
+      <a class="platform" data-os="android" href="#">
+        <span><span class="name">Android</span><span class="meta">8.0+, arm64 — receives files</span></span>
+        <span class="dl">Download .apk</span>
+      </a>
     </div>
 
     <section class="features">
@@ -195,10 +199,14 @@
     <div class="honest">
       <h2>What does not work yet</h2>
       <p>
-        <strong>No Android or iOS build.</strong> The desktop app is the part that exists.
-        A phone build needs an Android entry point, a Gradle wrapper and a multicast lock —
-        it is a port, not a checkbox. Shipping an APK that crashes on launch would waste
-        your time, so there is not one here.
+        <strong>Android can receive, not send.</strong> The APK launches, finds peers on the
+        same Wi-Fi and receives files into app-scoped storage you can reach over USB.
+        Picking a file <em>to send</em> needs Android's Storage Access Framework, which is
+        the next piece of work. The UI says so rather than showing a dead button.
+      </p>
+      <p>
+        <strong>No iOS build.</strong> Same port as Android, plus a sandbox that forbids the
+        multicast trick discovery relies on.
       </p>
       <p>
         <strong>No browser version, and there cannot be one.</strong> Browsers cannot open a
@@ -237,13 +245,15 @@
   document.getElementById("repo-link-2").textContent = owner + "/" + repo;
 
   var ua = navigator.userAgent.toLowerCase();
-  var os = ua.indexOf("win") > -1 ? "windows"
+  // Android before Linux: every Android user agent also contains "linux".
+  var os = ua.indexOf("android") > -1 ? "android"
+         : ua.indexOf("win") > -1 ? "windows"
          : ua.indexOf("mac") > -1 ? "macos"
          : ua.indexOf("linux") > -1 ? "linux" : null;
   var isArm = /arm|aarch64/.test(ua);
 
   var current = os === "linux" && isArm ? "linux-arm" : os;
-  var labels = { macos: "macOS", windows: "Windows", linux: "Linux", "linux-arm": "Linux ARM" };
+  var labels = { macos: "macOS", windows: "Windows", linux: "Linux", "linux-arm": "Linux ARM", android: "Android" };
 
   if (current) {
     var row = document.querySelector('.platform[data-os="' + current + '"]');
@@ -258,6 +268,7 @@
       case "windows":   return name + "-windows-x86_64.zip";
       case "linux":     return name + "-linux-x86_64.tar.gz";
       case "linux-arm": return name + "-linux-aarch64.tar.gz";
+      case "android":   return name + "-android.apk";
     }
   }
 
