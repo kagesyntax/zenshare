@@ -132,9 +132,27 @@ fn doctor(profile: &str) -> Result<()> {
         }
     }
 
-    match zs_net::listen("0.0.0.0:0".parse()?) {
+    // Binding a QUIC endpoint needs a Tokio reactor even though doctor never
+    // awaits anything, so give it one rather than pretending it is optional.
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    let addr: std::net::SocketAddr = "0.0.0.0:0".parse()?;
+
+    match runtime.block_on(async { zs_net::listen(addr) }) {
         Ok(l) => println!("  quic          ok, bound {}", l.local_addr),
-        Err(e) => println!("  quic          FAILED: {e}"),
+        Err(e) => {
+            // The context line alone ("bind QUIC listener") tells the user
+            // nothing actionable, so print the whole chain.
+            println!("  quic          FAILED");
+            for cause in e.chain() {
+                println!("                  {cause}");
+            }
+            // Exit non-zero. A diagnostic command that reports a broken
+            // environment and then exits 0 is worse than no command at all:
+            // CI reads the exit code, not the prose.
+            anyhow::bail!("QUIC listener could not bind");
+        }
     }
     Ok(())
 }
