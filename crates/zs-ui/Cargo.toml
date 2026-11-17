@@ -16,6 +16,9 @@ tracing.workspace = true
 # Storage Access Framework instead, which is a separate piece of work.
 [target.'cfg(not(target_os = "android"))'.dependencies]
 rfd.workspace = true
+# Screen readers are a desktop concern, and eframe refuses this feature on
+# Android. Enabling it only for non-Android targets keeps both sides honest.
+eframe = { workspace = true, features = ["accesskit"] }
 
 [lints]
 workspace = true

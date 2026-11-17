@@ -60,7 +60,10 @@ bytesize           = "2.7"
 humantime          = "2.4"
 
 # ── ui ──────────────────────────────────────────────────────────────
-eframe      = { version = "0.37", default-features = false, features = ["accesskit", "clipboard", "default_fonts", "links", "wgpu", "persistence"] }
+# `accesskit` is deliberately absent: eframe rejects it alongside the Android
+# backend ("only available with android-game-activity"). Screen-reader support is
+# a desktop concern, so it is enabled in zs-ui's desktop-only dependency table.
+eframe      = { version = "0.37", default-features = false, features = ["clipboard", "default_fonts", "links", "wgpu", "persistence"] }
 egui        = "0.37"
 egui_extras = "0.37"
 egui_dnd    = "0.18"
