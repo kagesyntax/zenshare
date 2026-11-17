@@ -102,7 +102,15 @@ mod android {
         // `Android/media/<pkg>/` is shared storage: writable without permissions
         // and browsable in Files, ZArchiver and anything else. It is where
         // WhatsApp and Telegram keep their media, for the same reason.
-        let media = external_media_dir(&app);
+        let external = app.external_data_path();
+        let media = external_media_dir(&app).or_else(|| {
+            // getExternalMediaDirs can come back empty or unusable. The path is
+            // deterministic though, so derive it from the external files dir the
+            // platform did give us: both live under the same volume root.
+            let derived = external.as_deref().and_then(media_dir_from_data);
+            log::info!("derived media dir: {derived:?}");
+            derived
+        });
         log::info!("external media dir: {media:?}");
 
         let paths = Arc::new(AppPaths::android(internal, media));
@@ -144,6 +152,22 @@ mod android {
         }
     }
 
+    /// `/storage/emulated/0/Android/media/<pkg>`, derived from the external
+    /// files directory.
+    ///
+    /// `/storage/emulated/0/Android/data/<pkg>/files` and
+    /// `/storage/emulated/0/Android/media/<pkg>` share a volume root, so the
+    /// first two components can simply be swapped. Used when the JNI call
+    /// returns nothing usable, which is what the emulator does.
+    fn media_dir_from_data(external: &std::path::Path) -> Option<PathBuf> {
+        const MARK: &str = "/Android/data/";
+        let s = external.to_string_lossy();
+        let idx = s.find(MARK)?;
+        let root = &s[..idx];
+        let package = s[idx + MARK.len()..].split('/').next()?;
+        Some(PathBuf::from(format!("{root}/Android/media/{package}")))
+    }
+
     /// `getExternalMediaDirs()[0]`, i.e. `/storage/emulated/0/Android/media/<pkg>`.
     ///
     /// Returns `None` if there is no external storage mounted, in which case the
@@ -156,11 +180,20 @@ mod android {
         // SAFETY: the Activity reference is valid while android_main is running.
         let activity = unsafe { JObject::from_raw(app.activity_as_ptr() as jobject) };
 
-        let dirs = env
+        let dirs = match env
             .call_method(&activity, "getExternalMediaDirs", "()[Ljava/io/File;", &[])
-            .ok()?
-            .l()
-            .ok()?;
+            .and_then(jni::objects::JValueOwned::l)
+        {
+            Ok(d) if !d.is_null() => d,
+            Ok(_) => {
+                log::warn!("getExternalMediaDirs returned null");
+                return None;
+            }
+            Err(e) => {
+                log::warn!("getExternalMediaDirs failed: {e}");
+                return None;
+            }
+        };
 
         // SAFETY: the call above returns a `java.io.File[]`.
         let arr = unsafe { JObjectArray::from_raw(dirs.into_raw()) };
@@ -169,16 +202,28 @@ mod android {
             return None;
         }
 
-        let first = env.get_object_array_element(&arr, 0).ok()?;
+        let first = match env.get_object_array_element(&arr, 0) {
+            Ok(f) => f,
+            Err(e) => {
+                log::warn!("getExternalMediaDirs[0] failed: {e}");
+                return None;
+            }
+        };
         if first.is_null() {
+            log::warn!("getExternalMediaDirs[0] is null");
             return None;
         }
 
-        let path = env
+        let path = match env
             .call_method(&first, "getAbsolutePath", "()Ljava/lang/String;", &[])
-            .ok()?
-            .l()
-            .ok()?;
+            .and_then(jni::objects::JValueOwned::l)
+        {
+            Ok(p) => p,
+            Err(e) => {
+                log::warn!("getAbsolutePath failed: {e}");
+                return None;
+            }
+        };
         // SAFETY: the call above returns a `java.lang.String`. The wrapper has
         // to outlive `get_string`, so it is bound rather than inlined.
         let jstr = JString::from(path);
