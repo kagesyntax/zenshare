@@ -16,13 +16,13 @@ no telemetry, no ads.
 **[Latest release →](https://github.com/kagesyntax/zenshare/releases/latest)** ·
 **[Download page](https://kagesyntax.github.io/zenshare/)** (auto-detects your OS)
 
-| macOS | Windows | Linux |
-| --- | --- | --- |
-| `macos-universal.zip` — Apple Silicon + Intel | `windows-x86_64.zip` — 10 / 11 | `linux-x86_64.tar.gz`, `linux-aarch64.tar.gz` |
+| macOS | Windows | Linux | Android |
+| --- | --- | --- | --- |
+| `macos-universal.zip` — Apple Silicon + Intel | `windows-x86_64.zip` — 10 / 11 | `linux-x86_64.tar.gz`, `linux-aarch64.tar.gz` | `android.apk` — arm64, receives only |
 
 These builds are not signed with a paid certificate, so macOS and Windows will
 warn you on first launch. [docs/PLATFORMS.md](docs/PLATFORMS.md) has the exact
-steps, and says plainly which platforms do not exist yet: Android, iOS, browser.
+steps, and says plainly what each platform can and cannot do.
 
 ![ZenShare in demo mode](docs/screenshot.png)
 
@@ -64,7 +64,8 @@ ZenShare is that tool:
 | Resume after disconnect | **not yet** — protocol field exists, wiring pending |
 | QR pairing | **not yet** |
 | WAN transfer (iroh) | **not yet** — feature-gated, phase 5 |
-| Android / iOS | **not yet** |
+| Android | **receives**; sending needs the Storage Access Framework |
+| iOS | **not yet** |
 
 ## Run it
 

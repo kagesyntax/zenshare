@@ -17,6 +17,7 @@ device you picked.
 | Windows 10 / 11 (64-bit) | [`zenshare-{{VERSION}}-windows-x86_64.zip`](https://github.com/{{REPO}}/releases/download/v{{VERSION}}/zenshare-{{VERSION}}-windows-x86_64.zip) |
 | Linux (64-bit Intel / AMD) | [`zenshare-{{VERSION}}-linux-x86_64.tar.gz`](https://github.com/{{REPO}}/releases/download/v{{VERSION}}/zenshare-{{VERSION}}-linux-x86_64.tar.gz) |
 | Linux (64-bit ARM, e.g. Raspberry Pi) | [`zenshare-{{VERSION}}-linux-aarch64.tar.gz`](https://github.com/{{REPO}}/releases/download/v{{VERSION}}/zenshare-{{VERSION}}-linux-aarch64.tar.gz) |
+| Android 8+ (arm64) | [`zenshare-{{VERSION}}-android.apk`](https://github.com/{{REPO}}/releases/download/v{{VERSION}}/zenshare-{{VERSION}}-android.apk) |
 
 ## First launch
 
@@ -34,6 +35,11 @@ xattr -dr com.apple.quarantine /Applications/ZenShare.app
 
 **Windows** — unzip anywhere and run `zenshare.exe`. SmartScreen will say
 "Windows protected your PC"; click **More info → Run anyway**.
+
+**Android** — open the `.apk` on your phone. Android will warn you about
+installing from an unknown source; that is expected, since this build is not
+distributed through the Play Store. Allow it for your browser or file manager,
+install, and open. It appears as a normal app called ZenShare.
 
 **Linux** — unpack and run:
 
@@ -69,12 +75,15 @@ hashes. If that passes, the transfer path is sound.
 - Drag-and-drop queue, custom-painted interface, no webview
 - Peer discovery over the local network
 - A headless sender: `zenshare send file.zip --to 192.168.1.24:47820`
+- Android app (arm64 + x86_64), no Gradle, no Java, no dex
 
 ## Known limits, stated plainly
 
-- **No Android or iOS yet.** The desktop app is the part that works. A phone
-  build needs an Android entry point, a Gradle wrapper, and a multicast lock —
-  it is a port, not a build flag.
+- **Android can receive but not send yet.** Picking a file on a phone needs the
+  Storage Access Framework, which is the next piece of work. Received files land
+  in `Android/data/dev.zenshare.app/files/ZenShare`, visible over USB.
+- **No iOS build.** Same work as Android, plus a sandbox that forbids the
+  multicast trick entirely.
 - **No browser version, and there cannot be one.** Browsers cannot open a raw
   UDP socket, and QUIC needs one. A web version would need a relay server in the
   middle, which is exactly the thing this project exists to avoid.

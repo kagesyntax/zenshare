@@ -233,9 +233,46 @@ jobs:
           path: dist/*.zip
           if-no-files-found: error
 
+  android:
+    name: Android APK
+    needs: [prepare, draft]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-ndk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+
+      - name: Locate the NDK
+        run: |
+          if [ -n "${ANDROID_NDK_LATEST_HOME:-}" ]; then
+            echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+          elif [ -d "$ANDROID_HOME/ndk" ]; then
+            latest="$(ls "$ANDROID_HOME/ndk" | sort -V | tail -1)"
+            echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$latest" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build and package
+        run: bash .github/scripts/build-apk.sh "${{ needs.prepare.outputs.version }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: dist/*.apk
+          if-no-files-found: error
+
   publish:
     name: Checksums and publish
-    needs: [prepare, draft, linux, linux-arm, macos, windows]
+    needs: [prepare, draft, linux, linux-arm, macos, windows, android]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

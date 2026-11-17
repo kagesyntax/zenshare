@@ -12,32 +12,43 @@ users.
 | Windows 10/11 x64 | **Works** | `zenshare-<ver>-windows-x86_64.zip` | Unsigned: SmartScreen → More info → Run anyway. |
 | Linux x86_64 | **Works** | `zenshare-<ver>-linux-x86_64.tar.gz` | Needs `libxkbcommon`, `libwayland`, `libGL` — present on any desktop distro. |
 | Linux aarch64 | **Works** | `zenshare-<ver>-linux-aarch64.tar.gz` | Raspberry Pi 4/5 and other ARM64 boards. |
-| Android | **Not yet** | — | See below. This is the biggest gap. |
+| Android 8+ (arm64) | **Receives** | `zenshare-<ver>-android.apk` | Launches, discovers peers, receives files. Sending needs SAF — see below. |
 | iOS | **Not yet** | — | Same work as Android, plus Apple's sandbox forbids the multicast trick. |
 | Browser | **Impossible as designed** | — | See below. This one is not a scheduling problem. |
 
 Every asset ships with `SHA256SUMS.txt` in the same release.
 
-## Android — a port, not a build flag
+## Android — what shipped, and what is left
 
-The app is a desktop program. Making it run on a phone is roughly two days of
-real work, and CI cannot substitute for it:
+The APK exists, builds in CI on every push, and is attached to every release.
 
-1. **Entry point.** Android has no `main()`. eframe needs a `cdylib` with a
-   `#[no_mangle] android_main` symbol, driven by `android-activity`.
-2. **Packaging.** An `AndroidManifest.xml`, a Gradle project, and `cargo-ndk`
-   producing `.so` files for `aarch64-linux-android`, `armv7`, and `x86_64`.
-3. **Multicast.** Android drops multicast packets unless the app holds a
-   `WifiManager.MulticastLock`. Without it, discovery silently finds nothing —
-   the same failure mode as the sandbox this was developed in.
-4. **Permissions.** `INTERNET`, `ACCESS_NETWORK_STATE`, `ACCESS_WIFI_STATE`, and
-   on Android 13+ `NEARBY_WIFI_DEVICES`.
-5. **Storage.** `~/Downloads` does not exist. The receiver needs a SAF
-   (`ACTION_OPEN_DOCUMENT_TREE`) destination, which is a JNI bridge.
+It is a `cdylib` loaded into `android.app.NativeActivity` — no Gradle, no Android
+Gradle Plugin, no Java, no Kotlin, no dex. The APK is assembled with `aapt2`,
+`zipalign` and `apksigner`, which ship with the SDK. `android:hasCode="false"` is
+literally true: there is one shared library and one manifest.
 
-The release workflow is deliberately not shipping a stub APK. An app that
-installs and then crashes on launch is worse than no app: it teaches the user
-that the project is broken rather than incomplete.
+What works today:
+
+- Launches as a normal app called ZenShare
+- Discovers peers on the same Wi-Fi, which required a `WifiManager.MulticastLock`
+  acquired over JNI — Android's Wi-Fi stack drops multicast packets without one,
+  and discovery fails silently rather than reporting an error
+- Receives files into `Android/data/dev.zenshare.app/files/ZenShare`, visible
+  over USB and in file managers, with no storage permission required
+
+What does not:
+
+- **Sending.** Picking a file needs the Storage Access Framework: an
+  `ACTION_OPEN_DOCUMENT` intent, an Activity result callback, and a content-URI
+  reader in place of a filesystem path. That is the next piece of work, and the
+  UI currently says "sending from this phone is not wired up yet" rather than
+  offering a button that does nothing.
+- **Layout.** The interface is still laid out for a 1080x700 desktop window. On a
+  phone it is cramped. Responsive layout is the task after SAF.
+- **iOS.** Same port, plus a sandbox that forbids the multicast approach.
+
+32-bit ARM is not built. Every phone sold since roughly 2018 is arm64, and the
+extra ABI would double build time for devices nobody is testing on.
 
 ## Browser — impossible without a relay
 
@@ -73,6 +84,7 @@ git tag v0.1.0 && git push --tags
               ├── linux aarch64     ubuntu-24.04-arm
               ├── macos universal   macos-14, lipo + ad-hoc codesign
               ├── windows x86_64    windows-latest
+              ├── android apk       ubuntu-latest + NDK via cargo-ndk
               └── publish: SHA256SUMS.txt, draft → latest
 ```
 
