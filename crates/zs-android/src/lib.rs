@@ -143,8 +143,21 @@ mod android {
     fn acquire_multicast_lock(app: &AndroidApp) -> Option<GlobalRef> {
         // SAFETY: both pointers are owned by android-activity and remain valid
         // for the lifetime of the process.
-        let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) }.ok()?;
-        let mut env = vm.attach_current_thread().ok()?;
+        let vm = match unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) } {
+            Ok(vm) => vm,
+            Err(e) => {
+                log::error!("multicast lock: JavaVM::from_raw failed: {e}");
+                return None;
+            }
+        };
+
+        let mut env = match vm.attach_current_thread() {
+            Ok(env) => env,
+            Err(e) => {
+                log::error!("multicast lock: attach_current_thread failed: {e}");
+                return None;
+            }
+        };
 
         // `activity_as_ptr` returns a `*mut c_void` whose *value is* the jobject.
         // Reinterpret the pointer, do not dereference it: casting to `jobject`
@@ -153,35 +166,75 @@ mod android {
         // SAFETY: the Activity reference is valid while android_main is running.
         let activity = unsafe { JObject::from_raw(app.activity_as_ptr() as jobject) };
 
-        let service = env.new_string("wifi").ok()?;
-        let wifi = env
+        let service = match env.new_string("wifi") {
+            Ok(s) => s,
+            Err(e) => {
+                log::error!("multicast lock: new_string failed: {e}");
+                return None;
+            }
+        };
+
+        let wifi = match env
             .call_method(
                 &activity,
                 "getSystemService",
                 "(Ljava/lang/String;)Ljava/lang/Object;",
                 &[JValue::Object(&JObject::from(service))],
             )
-            .ok()?
-            .l()
-            .ok()?;
+            .and_then(jni::objects::JValueOwned::l)
+        {
+            Ok(w) if !w.is_null() => w,
+            Ok(_) => {
+                log::error!("multicast lock: getSystemService(\"wifi\") returned null");
+                return None;
+            }
+            Err(e) => {
+                log::error!("multicast lock: getSystemService failed: {e}");
+                return None;
+            }
+        };
 
-        let tag = env.new_string("zenshare").ok()?;
-        let lock = env
+        let tag = match env.new_string("zenshare") {
+            Ok(s) => s,
+            Err(e) => {
+                log::error!("multicast lock: new_string failed: {e}");
+                return None;
+            }
+        };
+
+        let lock = match env
             .call_method(
                 &wifi,
                 "createMulticastLock",
                 "(Ljava/lang/String;)Landroid/net/wifi/WifiManager$MulticastLock;",
                 &[JValue::Object(&JObject::from(tag))],
             )
-            .ok()?
-            .l()
-            .ok()?;
+            .and_then(jni::objects::JValueOwned::l)
+        {
+            Ok(l) if !l.is_null() => l,
+            Ok(_) => {
+                log::error!("multicast lock: createMulticastLock returned null");
+                return None;
+            }
+            Err(e) => {
+                log::error!("multicast lock: createMulticastLock failed: {e}");
+                return None;
+            }
+        };
 
         // Reference-counted locks can be released by anything; a single
         // acquire/release pair is easier to reason about.
-        env.call_method(&lock, "setReferenceCounted", "(Z)V", &[JValue::Bool(0)])
-            .ok()?;
-        env.call_method(&lock, "acquire", "()V", &[]).ok()?;
+        if let Err(e) =
+            env.call_method(&lock, "setReferenceCounted", "(Z)V", &[JValue::Bool(0)])
+        {
+            log::error!("multicast lock: setReferenceCounted failed: {e}");
+            return None;
+        }
+
+        if let Err(e) = env.call_method(&lock, "acquire", "()V", &[]) {
+            log::error!("multicast lock: acquire failed: {e}");
+            return None;
+        }
 
         log::info!("multicast lock acquired");
         env.new_global_ref(lock).ok()

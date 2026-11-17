@@ -54,6 +54,9 @@ fn shared_socket() -> Result<std::net::UdpSocket> {
     #[cfg(unix)]
     sock.set_reuse_port(true)?;
     sock.set_nonblocking(true)?;
+    // Broadcast is the fallback when multicast is filtered. Plenty of consumer
+    // Wi-Fi access points drop multicast between clients but pass broadcast.
+    sock.set_broadcast(true)?;
     sock.bind(&SocketAddr::from((Ipv4Addr::UNSPECIFIED, PORT)).into())?;
 
     // Join the group. INADDR_ANY asks the OS to pick an interface; on machines
@@ -96,18 +99,23 @@ pub fn spawn(device: &DeviceInfo, quic_port: u16) -> Result<mpsc::Receiver<Heard
     {
         let sock = std::sync::Arc::clone(&sock);
         tokio::spawn(async move {
+            // Three destinations, because each one fails somewhere:
+            //   multicast  — filtered by some APs and by Android without a lock
+            //   broadcast  — filtered by some APs, but usually not the same ones
+            //   loopback   — lets two instances on one machine find each other
+            // Sending all three costs two extra datagrams every two seconds.
             let group = SocketAddr::V4(SocketAddrV4::new(GROUP, PORT));
-            // Loopback unicast as well as the group: some hosts (and most
-            // sandboxes) silently drop multicast, and two instances on one
-            // machine should still see each other.
+            let broadcast = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::BROADCAST, PORT));
             let local = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, PORT));
+
             let mut ticker = tokio::time::interval(ANNOUNCE_INTERVAL);
             loop {
                 ticker.tick().await;
-                if let Err(e) = sock.send_to(&payload, group).await {
-                    tracing::debug!(error = %e, "multicast announce failed");
+                for dest in [group, broadcast, local] {
+                    if let Err(e) = sock.send_to(&payload, dest).await {
+                        tracing::debug!(error = %e, %dest, "announce failed");
+                    }
                 }
-                let _ = sock.send_to(&payload, local).await;
             }
         });
     }

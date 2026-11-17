@@ -133,6 +133,9 @@ pub struct UiModel {
     pub transfers: Vec<TransferRow>,
     /// One-line status shown at the bottom.
     pub status: String,
+    /// What discovery is doing. Empty when normal; otherwise a short reason,
+    /// because "0 devices" with no explanation is unactionable.
+    pub discovery: String,
 }
 
 impl UiModel {
@@ -180,6 +183,7 @@ impl UiModel {
                 },
             ],
             status: "2 devices nearby  ·  encrypted  ·  no account".to_string(),
+            discovery: String::new(),
         }
     }
 }
@@ -478,7 +482,7 @@ impl App {
         let max_rows = (((area.height() - 30.0 - reserve) / (row_h + gap)) as usize).max(1);
 
         if m.peers.is_empty() {
-            draw_empty_state(&p, area, y);
+            draw_empty_state(&p, area, y, &m.discovery);
             return;
         }
 
@@ -894,37 +898,45 @@ impl App {
 
 /// What the device list shows before anything is discovered. Deliberately tells
 /// the user what to do rather than only that something is empty.
-fn draw_empty_state(p: &egui::Painter, area: Rect, y: f32) {
+fn draw_empty_state(p: &egui::Painter, area: Rect, y: f32, note: &str) {
     let r = Rect::from_min_size(Pos2::new(area.min.x, y), vec2(area.width(), 104.0));
     widgets::card_bordered(p, r, theme::SURFACE, theme::BORDER, theme::RADIUS);
 
-    let lines = [
+    let mut lines = vec![
         (
-            "Looking for devices…",
+            "Looking for devices…".to_string(),
             theme::medium(13.5),
             theme::TEXT_DIM,
             30.0,
         ),
         (
-            "Both devices must be on the same Wi-Fi.",
+            "Both devices must be on the same Wi-Fi.".to_string(),
             theme::regular(12.0),
             theme::TEXT_FAINT,
             54.0,
         ),
-        (
-            "Ask the other device to open ZenShare.",
+    ];
+
+    // When discovery knows it is broken, say so here. An empty list with no
+    // explanation sends people hunting for a network problem that may not exist.
+    if note.is_empty() {
+        lines.push((
+            "Ask the other device to open ZenShare.".to_string(),
             theme::regular(12.0),
             theme::TEXT_FAINT,
             74.0,
-        ),
-    ];
-    for (text, font, color, dy) in lines {
+        ));
+    } else {
+        lines.push((note.to_string(), theme::regular(12.0), theme::DANGER, 74.0));
+    }
+
+    for (text, font, color, dy) in &lines {
         widgets::text_left(
             p,
             Pos2::new(r.min.x + 18.0, r.min.y + dy),
             text,
-            font,
-            color,
+            font.clone(),
+            *color,
         );
     }
 }

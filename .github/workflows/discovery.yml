@@ -1,0 +1,64 @@
+name: Discovery
+
+# Proves that two separate processes find each other over the real network
+# stack. Discovery was broken for the entire life of this project and nothing
+# caught it, because every test either mocked the socket or was marked
+# `#[ignore]`d for needing a multicast-capable network.
+#
+# Two OS processes, one announces as "alpha", the other as "beta", and each must
+# hear the other. If this job is red, peers cannot find each other, full stop.
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - "crates/zs-net/**"
+      - "crates/zs-app/**"
+      - "crates/zs-core/**"
+      - ".github/workflows/discovery.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: discovery-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  two-process:
+    name: Two processes see each other
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build
+        run: cargo build --release --locked -p zs-app
+
+      - name: alpha and beta must discover each other
+        run: |
+          set -uo pipefail
+
+          ./target/release/zenshare peers --seconds 14 --name alpha > alpha.log 2>&1 &
+          A=$!
+          sleep 1
+          ./target/release/zenshare peers --seconds 14 --name beta > beta.log 2>&1 &
+          B=$!
+
+          wait $A || true
+          wait $B || true
+
+          echo "--- alpha ---"
+          cat alpha.log
+          echo "--- beta ---"
+          cat beta.log
+
+          fail=0
+          grep -q "HEARD beta" alpha.log || { echo "::error::alpha never heard beta"; fail=1; }
+          grep -q "HEARD alpha" beta.log || { echo "::error::beta never heard alpha"; fail=1; }
+          exit $fail

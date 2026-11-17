@@ -105,6 +105,9 @@ async fn run(
         Ok(rx) => Some(rx),
         Err(e) => {
             tracing::warn!("discovery unavailable: {e}");
+            if let Ok(mut m) = model.write() {
+                m.discovery = format!("Discovery failed to start: {e}");
+            }
             None
         }
     };

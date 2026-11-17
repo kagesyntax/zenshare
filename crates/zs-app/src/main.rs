@@ -47,6 +47,18 @@ enum Command {
     Gui,
     /// Check the environment and report what is available.
     Doctor,
+    /// Listen for nearby devices and print what is heard.
+    ///
+    /// Exists so discovery can be tested between two real processes instead of
+    /// being assumed to work. Run two of these and they should find each other.
+    Peers {
+        /// How long to listen, in seconds.
+        #[arg(long, default_value_t = 10)]
+        seconds: u64,
+        /// Name to announce as. Defaults to the hostname.
+        #[arg(long)]
+        name: Option<String>,
+    },
     /// Send files to a running `ZenShare` without opening a window.
     Send {
         /// Files to send.
@@ -79,6 +91,10 @@ fn main() -> Result<()> {
     match cli.command.unwrap_or(Command::Gui) {
         Command::Gui => gui(&cli.profile, &cli.bind, cli.on_top, cli.demo),
         Command::Doctor => doctor(&cli.profile),
+        Command::Peers { seconds, name } => tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()?
+            .block_on(peers(seconds, name)),
         Command::Send { paths, to } => tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()?
@@ -106,6 +122,40 @@ fn gui(profile: &str, bind: &str, on_top: bool, demo: bool) -> Result<()> {
     }
 
     zs_ui::run(model, tx, on_top, demo).map_err(|e| anyhow::anyhow!("window: {e}"))?;
+    Ok(())
+}
+
+async fn peers(seconds: u64, name: Option<String>) -> Result<()> {
+    // Without a subscriber, `tracing::warn!` from the beacon goes nowhere and a
+    // failed multicast join looks identical to a working one.
+    let _ = tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .with_target(false)
+        .try_init();
+
+    let name = name.unwrap_or_else(|| {
+        std::env::var("USER").map_or_else(|_| "device".to_string(), |u| format!("{u}-device"))
+    });
+
+    // Deterministic per name, so two processes with different --name values are
+    // different devices and do not filter each other out as "self".
+    let id = zs_core::DeviceId(*blake3::hash(name.as_bytes()).as_bytes());
+    let device = zs_core::DeviceInfo::local(id, name.clone());
+
+    let mut rx = zs_net::beacon::spawn(&device, 47820)?;
+    println!("announcing as {name}; listening for {seconds}s");
+
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(seconds);
+    loop {
+        tokio::select! {
+            Some(heard) = rx.recv() => {
+                println!("HEARD {} at {}", heard.announce.device.name, heard.quic_addr);
+            }
+            () = tokio::time::sleep_until(deadline) => break,
+        }
+    }
+
+    println!("done");
     Ok(())
 }
 
