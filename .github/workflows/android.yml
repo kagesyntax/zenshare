@@ -1,0 +1,112 @@
+name: Android
+
+on:
+  push:
+    branches: [master, main]
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    name: Build APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-ndk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+
+      - name: Locate the NDK
+        run: |
+          # The runner ships an NDK; cargo-ndk needs to be told where.
+          if [ -n "${ANDROID_NDK_LATEST_HOME:-}" ]; then
+            echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+          elif [ -d "$ANDROID_HOME/ndk" ]; then
+            latest="$(ls "$ANDROID_HOME/ndk" | sort -V | tail -1)"
+            echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$latest" >> "$GITHUB_ENV"
+          fi
+          echo "SDK=$ANDROID_HOME"
+          ls "$ANDROID_HOME"
+
+      # arm64-v8a covers every phone sold since roughly 2018. x86_64 is here so
+      # the emulator works; there is no point building 32-bit ARM for a v0.1.
+      - name: Build native library
+        run: |
+          cargo ndk -t arm64-v8a -t x86_64 -o jniLibs build --release -p zs-android
+
+      - name: Package APK
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          BUILD_TOOLS="$SDK/build-tools/$(ls "$SDK/build-tools" | sort -V | tail -1)"
+          PLATFORM_JAR="$SDK/platforms/$(ls "$SDK/platforms" | sort -V | tail -1)/android.jar"
+          VERSION="${GITHUB_REF_NAME#v}"
+          case "$VERSION" in v*|master|main) VERSION="0.1.1";; esac
+
+          echo "build-tools: $BUILD_TOOLS"
+          echo "platform:    $PLATFORM_JAR"
+
+          mkdir -p dist/apk
+          "$BUILD_TOOLS/aapt2" link \
+            -o dist/apk/base.apk \
+            -I "$PLATFORM_JAR" \
+            --manifest crates/zs-android/android/AndroidManifest.xml \
+            --version-code 1 \
+            --version-name "$VERSION" \
+            --min-sdk-version 26 \
+            --target-sdk-version 34
+
+          # Native libraries are added after aapt2 because they are not resources.
+          pushd dist/apk
+          mkdir -p lib/arm64-v8a lib/x86_64
+          cp ../../jniLibs/arm64-v8a/libzenshare.so lib/arm64-v8a/
+          cp ../../jniLibs/x86_64/libzenshare.so lib/x86_64/
+          zip -q -r base.apk lib
+          popd
+
+          "$BUILD_TOOLS/zipalign" -f 4 dist/apk/base.apk dist/apk/aligned.apk
+
+          # A throwaway key. These builds are not Play Store releases and the
+          # certificate is regenerated on every build, so it proves nothing
+          # beyond "this APK is internally consistent".
+          keytool -genkeypair -keystore dist/debug.keystore \
+            -storepass android -keypass android -alias androiddebugkey \
+            -dname "CN=Android Debug,O=Android,C=US" \
+            -keyalg RSA -keysize 2048 -validity 10000
+
+          "$BUILD_TOOLS/apksigner" sign \
+            --ks dist/debug.keystore --ks-pass pass:android --key-pass pass:android \
+            --out "dist/zenshare-$VERSION-android.apk" \
+            dist/apk/aligned.apk
+
+          "$BUILD_TOOLS/apksigner" verify --print-certs "dist/zenshare-$VERSION-android.apk" | head -5
+          ls -la dist/*.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: dist/*.apk
+          if-no-files-found: error

@@ -1,0 +1,38 @@
+[package]
+name = "zs-android"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+# The .so name is what Android loads, and the manifest points at it by name:
+# `android.app.lib_name = "zenshare"` -> libzenshare.so.
+name = "zenshare"
+crate-type = ["cdylib"]
+
+[dependencies]
+zs-app = { path = "../zs-app" }
+zs-ui = { path = "../zs-ui" }
+async-channel.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+# eframe's Android backend is a feature, not a default. Enabling it here is
+# inert on desktop targets, so the workspace still builds normally.
+eframe = { workspace = true, features = ["android-native-activity"] }
+egui.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+android-activity = { version = "0.6", features = ["native-activity"] }
+jni = "0.21"
+
+# Cargo forbids inheriting workspace lints and overriding one of them, so this
+# crate spells its lints out. The workspace denies unsafe; JNI cannot be written
+# without it, so the exception is made here rather than for everyone.
+[lints.rust]
+unsafe_code = "allow"
+unused_must_use = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
