@@ -179,8 +179,10 @@ mod android {
             .ok()?
             .l()
             .ok()?;
-        // SAFETY: the call above returns a `java.lang.String`.
-        let s = env.get_string(&JString::from(path)).ok()?;
+        // SAFETY: the call above returns a `java.lang.String`. The wrapper has
+        // to outlive `get_string`, so it is bound rather than inlined.
+        let jstr = JString::from(path);
+        let s = env.get_string(&jstr).ok()?;
 
         Some(PathBuf::from(s.to_string_lossy().as_ref()))
     }
