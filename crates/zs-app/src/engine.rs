@@ -5,6 +5,7 @@
 //! channel. That separation is why the window stays at 60 fps while eight QUIC
 //! streams are saturating the link.
 
+use crate::paths::AppPaths;
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
@@ -23,25 +24,6 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
 fn next_id() -> String {
     format!("t{}", NEXT_ID.fetch_add(1, Ordering::Relaxed))
-}
-
-/// Where this profile keeps its identity.
-pub fn identity_path(profile: &str) -> Result<PathBuf> {
-    let dirs = directories::ProjectDirs::from("dev", "zenshare", "ZenShare")
-        .context("no home directory")?;
-    let mut dir = dirs.data_dir().to_path_buf();
-    if !profile.is_empty() {
-        dir.push("profiles");
-        dir.push(profile);
-    }
-    Ok(dir.join("identity.key"))
-}
-
-/// Default destination for received files.
-pub fn downloads_dir() -> PathBuf {
-    directories::UserDirs::new()
-        .and_then(|u| u.download_dir().map(std::path::Path::to_path_buf))
-        .unwrap_or_else(|| std::env::temp_dir().join("ZenShare"))
 }
 
 fn hostname() -> String {
@@ -65,8 +47,8 @@ fn hostname() -> String {
 pub fn spawn(
     model: Arc<RwLock<UiModel>>,
     actions: async_channel::Receiver<UiAction>,
-    profile: String,
     bind: Ipv4Addr,
+    paths: Arc<AppPaths>,
 ) -> Result<()> {
     std::thread::Builder::new()
         .name("zs-engine".to_string())
@@ -81,7 +63,7 @@ pub fn spawn(
                     return;
                 }
             };
-            if let Err(e) = rt.block_on(run(model, actions, profile, bind)) {
+            if let Err(e) = rt.block_on(run(model, actions, bind, paths)) {
                 tracing::error!("engine stopped: {e:#}");
             }
         })
@@ -92,10 +74,11 @@ pub fn spawn(
 async fn run(
     model: Arc<RwLock<UiModel>>,
     actions: async_channel::Receiver<UiAction>,
-    profile: String,
     bind_ip: Ipv4Addr,
+    paths: Arc<AppPaths>,
 ) -> Result<()> {
-    let identity = zs_crypto::load_or_create(&identity_path(&profile)?)?;
+    paths.ensure()?;
+    let identity = zs_crypto::load_or_create(&paths.identity)?;
     let device = DeviceInfo::local(identity.device_id(), hostname());
 
     let listener = zs_net::listen(SocketAddr::from((bind_ip, 0)))?;
@@ -134,7 +117,7 @@ async fn run(
         tokio::select! {
             action = actions.recv() => {
                 match action {
-                    Ok(action) => handle_action(&model, &peers, action),
+                    Ok(action) => handle_action(&model, &peers, action, &paths),
                     Err(_) => break,
                 }
             }
@@ -151,7 +134,7 @@ async fn run(
             }
             incoming = listener.endpoint.accept() => {
                 if let Some(incoming) = incoming {
-                    spawn_receive(&model, incoming);
+                    spawn_receive(&model, incoming, Arc::clone(&paths));
                 }
             }
             () = tokio::time::sleep(Duration::from_secs(1)) => {
@@ -216,6 +199,7 @@ fn handle_action(
     model: &Arc<RwLock<UiModel>>,
     peers: &HashMap<DeviceId, (SocketAddr, Instant)>,
     action: UiAction,
+    paths: &Arc<AppPaths>,
 ) {
     match action {
         UiAction::Send { peer, files } => {
@@ -246,9 +230,8 @@ fn handle_action(
             }
         }
         UiAction::RevealDownloads => {
-            let dir = downloads_dir();
-            let _ = std::fs::create_dir_all(&dir);
-            let _ = open::that(dir);
+            let _ = std::fs::create_dir_all(&paths.downloads);
+            reveal(&paths.downloads);
         }
     }
 }
@@ -318,7 +301,11 @@ async fn do_send(
     Ok(())
 }
 
-fn spawn_receive(model: &Arc<RwLock<UiModel>>, incoming: quinn::Incoming) {
+fn spawn_receive(
+    model: &Arc<RwLock<UiModel>>,
+    incoming: quinn::Incoming,
+    paths: Arc<AppPaths>,
+) {
     let model = Arc::clone(model);
     tokio::spawn(async move {
         let conn = match incoming.await {
@@ -344,7 +331,7 @@ fn spawn_receive(model: &Arc<RwLock<UiModel>>, incoming: quinn::Incoming) {
             },
         );
 
-        let dest = downloads_dir();
+        let dest = paths.downloads.clone();
         let _ = std::fs::create_dir_all(&dest);
         let progress = progress_hook(Arc::clone(&model), id.clone());
 
@@ -405,6 +392,16 @@ fn fail_row(model: &Arc<RwLock<UiModel>>, id: &str, reason: &str) {
         m.status = format!("failed: {reason}");
     }
 }
+
+/// Ask the OS to show the downloads folder. No-op on Android, which has no
+/// file manager to hand a path to.
+#[cfg(not(target_os = "android"))]
+fn reveal(path: &std::path::Path) {
+    let _ = open::that(path);
+}
+
+#[cfg(target_os = "android")]
+fn reveal(_path: &std::path::Path) {}
 
 fn set_status(model: &Arc<RwLock<UiModel>>, text: &str) {
     if let Ok(mut m) = model.write() {

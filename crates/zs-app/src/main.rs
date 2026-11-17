@@ -1,12 +1,15 @@
-//! `ZenShare` entry point.
-
-mod engine;
+//! ZenShare desktop entry point.
+//!
+//! All the interesting parts live in the library so the Android build can reuse
+//! them; this file is argument parsing and process setup.
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
+use zs_app::engine;
+use zs_app::paths::AppPaths;
 use zs_transfer::{Progress, SendItem};
 use zs_ui::UiModel;
 
@@ -98,7 +101,8 @@ fn gui(profile: &str, bind: &str, on_top: bool, demo: bool) -> Result<()> {
 
     if !demo {
         let bind_ip: std::net::Ipv4Addr = bind.parse().context("--bind must be an IPv4 address")?;
-        engine::spawn(Arc::clone(&model), rx, profile.to_string(), bind_ip)?;
+        let paths = Arc::new(AppPaths::desktop(profile)?);
+        engine::spawn(Arc::clone(&model), rx, bind_ip, paths)?;
     }
 
     zs_ui::run(model, tx, on_top, demo).map_err(|e| anyhow::anyhow!("window: {e}"))?;
@@ -114,14 +118,15 @@ fn doctor(profile: &str) -> Result<()> {
     );
     println!("  streams       {}", zs_transfer::PARALLEL_STREAMS);
 
-    let path = engine::identity_path(profile)?;
-    let identity = zs_crypto::load_or_create(&path)?;
+    let paths = AppPaths::desktop(profile)?;
+    paths.ensure()?;
+    let identity = zs_crypto::load_or_create(&paths.identity)?;
     println!(
         "  identity      {}  ({})",
         identity.device_id(),
-        path.display()
+        paths.identity.display()
     );
-    println!("  downloads     {}", engine::downloads_dir().display());
+    println!("  downloads     {}", paths.downloads.display());
 
     let ips = zs_net::local_ips();
     if ips.is_empty() {

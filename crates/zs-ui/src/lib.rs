@@ -200,7 +200,33 @@ pub enum UiAction {
     RevealDownloads,
 }
 
-/// Launch the window. Blocks until the user closes it.
+/// How the window should behave, separate from what it displays.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct AppOptions {
+    /// Keep the window above everything else.
+    pub on_top: bool,
+    /// Fill the model with sample data instead of talking to an engine.
+    pub demo: bool,
+}
+
+/// Build the app for a given egui context.
+///
+/// Exposed separately from [`run`] because the Android build creates its own
+/// `NativeOptions` (it has to pass the `AndroidApp` handle) but must produce the
+/// exact same app.
+#[must_use]
+pub fn make_app(
+    cc: &eframe::CreationContext<'_>,
+    model: Arc<RwLock<UiModel>>,
+    actions: async_channel::Sender<UiAction>,
+    options: AppOptions,
+) -> Box<dyn eframe::App> {
+    theme::install_fonts(&cc.egui_ctx);
+    theme::install_style(&cc.egui_ctx);
+    Box::new(App::new(model, actions, options.demo))
+}
+
+/// Launch the desktop window. Blocks until the user closes it.
 ///
 /// # Errors
 /// Returns an error if a graphics context cannot be created.
@@ -212,7 +238,9 @@ pub fn run(
 ) -> eframe::Result {
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([1080.0, 700.0])
-        .with_min_inner_size([900.0, 580.0])
+        // Small enough that a 1280x800 laptop does not fight it, and so the
+        // narrow layout can actually be reached by resizing.
+        .with_min_inner_size([360.0, 480.0])
         .with_title("ZenShare");
 
     // Keep the progress window above everything else while a transfer runs.
@@ -221,19 +249,13 @@ pub fn run(
         viewport = viewport.with_always_on_top();
     }
 
-    let options = eframe::NativeOptions {
-        viewport,
-        ..Default::default()
-    };
+    let options = eframe::NativeOptions { viewport, ..Default::default() };
+    let app_options = AppOptions { on_top, demo };
 
     eframe::run_native(
         "ZenShare",
         options,
-        Box::new(move |cc| {
-            theme::install_fonts(&cc.egui_ctx);
-            theme::install_style(&cc.egui_ctx);
-            Ok(Box::new(App::new(model, actions, demo)))
-        }),
+        Box::new(move |cc| Ok(make_app(cc, model, actions, app_options))),
     )
 }
 
@@ -291,12 +313,18 @@ impl App {
     }
 
     fn pick_files(&mut self) {
+        #[cfg(not(target_os = "android"))]
         if let Some(paths) = rfd::FileDialog::new()
             .set_title("Choose files to send")
             .pick_files()
         {
             self.add_files(paths);
         }
+
+        // Android has no file dialog and no drag-and-drop. Picking files there
+        // needs the Storage Access Framework; until that lands, a phone can
+        // receive but not send, and the UI says so rather than offering a
+        // button that silently does nothing.
     }
 }
 
@@ -687,17 +715,25 @@ impl App {
                 Icon::Folder,
                 theme::TEXT_FAINT,
             );
+            #[cfg(not(target_os = "android"))]
+            let (title, hint) = ("Drop files here", "or click to browse");
+            #[cfg(target_os = "android")]
+            let (title, hint) = (
+                "Ready to receive",
+                "sending from this phone is not wired up yet",
+            );
+
             widgets::text_center(
                 &p,
                 Pos2::new(c.x, c.y + 2.0),
-                "Drop files here",
+                title,
                 theme::medium(14.5),
                 theme::TEXT,
             );
             widgets::text_center(
                 &p,
                 Pos2::new(c.x, c.y + 24.0),
-                "or click to browse",
+                hint,
                 theme::regular(12.0),
                 theme::TEXT_FAINT,
             );

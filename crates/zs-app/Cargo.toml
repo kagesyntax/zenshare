@@ -27,6 +27,9 @@ memmap2.workspace = true
 bytesize.workspace = true
 humantime.workspace = true
 directories.workspace = true
+
+# Handing a path to the OS file manager is a desktop idea.
+[target.'cfg(not(target_os = "android"))'.dependencies]
 open.workspace = true
 
 [lints]
