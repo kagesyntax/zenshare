@@ -96,7 +96,20 @@ confidence-threshold = 0.9
 
 [advisories]
 yanked = "deny"
-ignore = []
+
+# `unmaintained` advisories are warnings about the future, not vulnerabilities
+# today. Each entry below is a deliberate, documented decision.
+ignore = [
+  # zbus_names / zvariant / zvariant_derive, reached via accesskit_unix -> zbus.
+  # There is no CVE here: RUSTSEC is flagging that nobody is actively maintaining
+  # these crates. Dropping accesskit would mean shipping without screen-reader
+  # support, which is a worse trade for a desktop app than carrying an
+  # unmaintained but working D-Bus binding on the Linux path only.
+  # Revisit when accesskit moves off zbus.
+  "RUSTSEC-2026-0370",
+  "RUSTSEC-2026-0371",
+  "RUSTSEC-2026-0372",
+]
 
 [sources]
 unknown-registry = "deny"
