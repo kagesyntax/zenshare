@@ -48,16 +48,18 @@ popd > /dev/null
 
 "$BUILD_TOOLS/zipalign" -f 4 dist/apk/base.apk dist/apk/aligned.apk
 
-# A throwaway key, regenerated every build. These are not Play Store releases and
-# the certificate proves nothing about identity — only that the APK is internally
-# consistent. Saying so here stops anyone mistaking it for a signing setup.
-keytool -genkeypair -keystore dist/debug.keystore \
-  -storepass android -keypass android -alias androiddebugkey \
-  -dname "CN=Android Debug,O=Android,C=US" \
-  -keyalg RSA -keysize 2048 -validity 10000
+# A committed debug key, not a generated one.
+#
+# Android refuses to install an update whose signing certificate differs from the
+# installed app's. Generating a fresh key per build therefore means every release
+# is an uninstall-then-install, which is a terrible way to ship a patch. This key
+# is public, has the standard debug password, and exists only so consecutive
+# builds are upgrades of one another — it proves nothing about identity and must
+# never be used for a Play Store release.
+KEYSTORE="crates/zs-android/android/debug.keystore"
 
 "$BUILD_TOOLS/apksigner" sign \
-  --ks dist/debug.keystore --ks-pass pass:android --key-pass pass:android \
+  --ks "$KEYSTORE" --ks-pass pass:android --key-pass pass:android \
   --out "dist/zenshare-$VERSION-android.apk" \
   dist/apk/aligned.apk
 
