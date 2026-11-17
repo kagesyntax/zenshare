@@ -164,7 +164,7 @@ mod android {
 
         // SAFETY: the call above returns a `java.io.File[]`.
         let arr = unsafe { JObjectArray::from_raw(dirs.into_raw()) };
-        if arr.len(&env).unwrap_or(0) == 0 {
+        if env.get_array_length(&arr).unwrap_or(0) == 0 {
             log::warn!("getExternalMediaDirs returned an empty array");
             return None;
         }
