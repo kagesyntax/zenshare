@@ -117,6 +117,51 @@ devices…" forever. That is a discovery limitation, not a transfer one; use
 
 `doctor` exits non-zero if something is wrong, so it is safe to use in scripts.
 
+## When devices do not see each other
+
+Discovery is the least reliable part of any LAN tool, including this one. Work
+through these in order — the first two account for almost every report.
+
+**1. macOS firewall.** The Application Firewall blocks incoming connections for
+unsigned apps, and it does so silently. Check:
+
+```sh
+/usr/libexec/ApplicationFirewall/socketfilterfw --listapps | grep -A1 -i zenshare
+```
+
+If the entry has no `( Allow incoming connections )` line, it is blocked. Fix it
+in System Settings → Network → Firewall → Options: find ZenShare, set it to
+*Allow incoming connections*. Or turn the firewall off for the duration of the
+test.
+
+**2. Android multicast lock.** Android drops multicast packets unless the app
+holds a `WifiManager.MulticastLock`. ZenShare requests one at startup and logs
+the result:
+
+```sh
+adb logcat -d -s zenshare | grep -i multicast
+```
+
+`multicast lock acquired` is what you want. `acquire failed: Java exception was
+thrown` means the Wi-Fi service refused — common on emulators, which have no real
+Wi-Fi stack, and rare on physical devices.
+
+**3. Access point isolation.** Many guest and corporate networks, and some home
+routers with "AP isolation" or "client isolation" enabled, drop traffic between
+wireless clients entirely. No amount of application code fixes that. Test by
+connecting both devices to a phone hotspot instead.
+
+**4. Prove it is not the protocol.** Two processes on one machine, which does not
+touch the firewall or the access point:
+
+```sh
+./zenshare peers --seconds 10 --name alpha &
+./zenshare peers --seconds 10 --name beta
+```
+
+Each should print `HEARD` for the other. CI runs exactly this on every push; if
+it passes there and fails on your network, the network is the variable.
+
 ## Performance
 
 `selftest` on an x86_64 Mac, loopback, 512 MiB payload, release build:
