@@ -118,12 +118,18 @@ impl Progress {
 }
 
 /// Outcome of a completed transfer.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct Report {
     /// Bytes moved.
     pub bytes: u64,
     /// Wall-clock duration.
     pub elapsed: Duration,
+    /// Files that landed, in the order they were committed. Empty for a send.
+    ///
+    /// The receiver needs these because on Android the destination directory is
+    /// app-scoped: the platform has to move each file somewhere a human can
+    /// reach, and it can only do that if it knows what was written.
+    pub files: Vec<PathBuf>,
 }
 
 impl Report {
@@ -324,6 +330,7 @@ pub async fn send(
     Ok(Report {
         bytes: sent,
         elapsed: started.elapsed(),
+        files: Vec::new(),
     })
 }
 
@@ -501,6 +508,7 @@ pub async fn recv(
     Ok(Report {
         bytes: done_bytes.load(Ordering::Relaxed),
         elapsed: started.elapsed(),
+        files: targets.iter().map(|t| t.final_path.clone()).collect(),
     })
 }
 

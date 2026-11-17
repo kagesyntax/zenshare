@@ -23,7 +23,7 @@ mod android {
 
     use android_activity::AndroidApp;
     use jni::JavaVM;
-    use jni::objects::{GlobalRef, JObject, JValue};
+    use jni::objects::{GlobalRef, JObject, JObjectArray, JString, JValue};
     use jni::sys::jobject;
 
     use zs_app::engine;
@@ -97,7 +97,16 @@ mod android {
         log::info!("internal storage: {}", internal.display());
         log::info!("external storage: {:?}", app.external_data_path());
 
-        let paths = Arc::new(AppPaths::android(internal, app.external_data_path()));
+        // `Android/data/<pkg>/` is app-scoped and, since Android 11, invisible to
+        // every file manager on the device — including over USB on many phones.
+        // `Android/media/<pkg>/` is shared storage: writable without permissions
+        // and browsable in Files, ZArchiver and anything else. It is where
+        // WhatsApp and Telegram keep their media, for the same reason.
+        let media = external_media_dir(&app);
+        log::info!("external media dir: {media:?}");
+
+        let paths = Arc::new(AppPaths::android(internal, media));
+        log::info!("downloads dir: {}", paths.downloads.display());
         if let Err(e) = paths.ensure() {
             log::error!("could not create directories: {e:#}");
         }
@@ -133,6 +142,47 @@ mod android {
             Ok(()) => log::info!("window closed normally"),
             Err(e) => log::error!("could not create the window: {e}"),
         }
+    }
+
+    /// `getExternalMediaDirs()[0]`, i.e. `/storage/emulated/0/Android/media/<pkg>`.
+    ///
+    /// Returns `None` if there is no external storage mounted, in which case the
+    /// caller falls back to app-internal storage and files will be hard to find.
+    fn external_media_dir(app: &AndroidApp) -> Option<PathBuf> {
+        // SAFETY: both pointers are owned by android-activity and remain valid
+        // for the lifetime of the process.
+        let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) }.ok()?;
+        let mut env = vm.attach_current_thread().ok()?;
+        // SAFETY: the Activity reference is valid while android_main is running.
+        let activity = unsafe { JObject::from_raw(app.activity_as_ptr() as jobject) };
+
+        let dirs = env
+            .call_method(&activity, "getExternalMediaDirs", "()[Ljava/io/File;", &[])
+            .ok()?
+            .l()
+            .ok()?;
+
+        // SAFETY: the call above returns a `java.io.File[]`.
+        let arr = unsafe { JObjectArray::from_raw(dirs.into_raw()) };
+        if arr.len(&env).unwrap_or(0) == 0 {
+            log::warn!("getExternalMediaDirs returned an empty array");
+            return None;
+        }
+
+        let first = env.get_object_array_element(&arr, 0).ok()?;
+        if first.is_null() {
+            return None;
+        }
+
+        let path = env
+            .call_method(&first, "getAbsolutePath", "()Ljava/lang/String;", &[])
+            .ok()?
+            .l()
+            .ok()?;
+        // SAFETY: the call above returns a `java.lang.String`.
+        let s = env.get_string(&JString::from(path)).ok()?;
+
+        Some(PathBuf::from(s.to_string_lossy().as_ref()))
     }
 
     /// Acquire the multicast lock, returning it so it is never dropped.
