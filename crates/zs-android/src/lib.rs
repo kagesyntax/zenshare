@@ -3,7 +3,11 @@
 //! Android has no `main()`. The OS loads this shared library into an Activity
 //! and calls `android_main`, so this crate is a `cdylib` rather than a binary.
 //! Everything below it — engine, transfer, UI — is the same code the desktop
-//! runs; only the process lifecycle and two Android-specific details differ.
+//! runs; only the process lifecycle and a few Android-specific details differ.
+//!
+//! Diagnostics go to logcat under the tag `zenshare`, because a native failure
+//! on Android is otherwise completely silent: the Activity finishes and the user
+//! lands on the home screen with nothing to read.
 
 #![deny(missing_docs)]
 // JNI is unsafe by nature: we hand raw pointers to the JVM and call methods by
@@ -12,6 +16,7 @@
 
 #[cfg(target_os = "android")]
 mod android {
+    use std::io::Write;
     use std::net::Ipv4Addr;
     use std::path::PathBuf;
     use std::sync::{Arc, OnceLock, RwLock};
@@ -32,13 +37,54 @@ mod android {
     /// line of Android-specific code in the project.
     static MULTICAST_LOCK: OnceLock<Option<GlobalRef>> = OnceLock::new();
 
+    /// Forwards formatted tracing output to logcat.
+    struct Logcat;
+
+    impl Write for Logcat {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            for line in String::from_utf8_lossy(buf).lines() {
+                if !line.trim().is_empty() {
+                    log::info!("{line}");
+                }
+            }
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn init_logging() {
+        android_logger::init_once(
+            android_logger::Config::default()
+                .with_max_level(log::LevelFilter::Info)
+                .with_tag("zenshare"),
+        );
+
+        let _ = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::INFO)
+            .with_ansi(false)
+            .with_writer(|| Logcat)
+            .try_init();
+
+        // A panic on a background thread used to vanish entirely. This at least
+        // puts it in logcat with a file and line.
+        std::panic::set_hook(Box::new(|info| {
+            log::error!("panic: {info}");
+        }));
+    }
+
     /// Called by `android-activity` once the Activity is ready.
     ///
     /// `#[unsafe(no_mangle)]` is required in edition 2024; the symbol name is
-    /// what the loader looks up with `dlsym`.
+    /// what the loader looks up with `dlsym`. It is `pub` so the symbol is
+    /// unambiguously exported from the cdylib.
     #[unsafe(no_mangle)]
-    fn android_main(app: AndroidApp) {
-        // Held for the lifetime of the process, which is what the lock wants.
+    pub fn android_main(app: AndroidApp) {
+        init_logging();
+        log::info!("ZenShare starting ({} build)", env!("CARGO_PKG_VERSION"));
+
         let _ = MULTICAST_LOCK.set(acquire_multicast_lock(&app));
 
         // Android has no $HOME. Internal storage is private and always writable;
@@ -47,30 +93,45 @@ mod android {
         let internal = app
             .internal_data_path()
             .unwrap_or_else(|| PathBuf::from("/data/local/tmp"));
-        let external = app.external_data_path();
+        log::info!("internal storage: {}", internal.display());
+        log::info!("external storage: {:?}", app.external_data_path());
 
-        let paths = Arc::new(AppPaths::android(internal, external));
-        let _ = paths.ensure();
+        let paths = Arc::new(AppPaths::android(internal, app.external_data_path()));
+        if let Err(e) = paths.ensure() {
+            log::error!("could not create directories: {e:#}");
+        }
 
         let model = Arc::new(RwLock::new(UiModel::default()));
         let (tx, rx) = async_channel::unbounded();
 
-        let _ = engine::spawn(
+        if let Err(e) = engine::spawn(
             Arc::clone(&model),
             rx,
             Ipv4Addr::UNSPECIFIED,
             Arc::clone(&paths),
-        );
+        ) {
+            log::error!("engine failed to start: {e:#}");
+        }
 
         let mut options = eframe::NativeOptions::default();
         options.android_app = Some(app);
         options.viewport = eframe::egui::ViewportBuilder::default().with_title("ZenShare");
+        // OpenGL ES 3 rather than Vulkan: a device with no usable Vulkan driver
+        // cannot create a wgpu surface at all, and the app exits before drawing
+        // a single pixel. GLES is present on everything.
+        options.renderer = eframe::Renderer::Glow;
 
-        let _ = eframe::run_native(
+        // The result used to be discarded with `let _ =`, which meant a failure
+        // here looked exactly like a normal quit: the Activity finishes and the
+        // user lands on the home screen with no message. Never swallow this.
+        match eframe::run_native(
             "ZenShare",
             options,
             Box::new(move |cc| Ok(zs_ui::make_app(cc, model, tx, AppOptions::default()))),
-        );
+        ) {
+            Ok(()) => log::info!("window closed normally"),
+            Err(e) => log::error!("could not create the window: {e}"),
+        }
     }
 
     /// Acquire the multicast lock, returning it so it is never dropped.
@@ -120,6 +181,7 @@ mod android {
             .ok()?;
         env.call_method(&lock, "acquire", "()V", &[]).ok()?;
 
+        log::info!("multicast lock acquired");
         env.new_global_ref(lock).ok()
     }
 }

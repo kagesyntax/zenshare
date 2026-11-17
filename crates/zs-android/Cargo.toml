@@ -26,6 +26,14 @@ egui.workspace = true
 [target.'cfg(target_os = "android")'.dependencies]
 android-activity = { version = "0.6", features = ["native-activity"] }
 jni = "0.21"
+log = "0.4"
+android_logger = "0.14"
+tracing-subscriber.workspace = true
+
+# wgpu means Vulkan on Android, and a device without a working Vulkan driver
+# simply cannot start the window. OpenGL ES 3 is universal, so the Android build
+# gets the glow renderer as well and selects it at runtime.
+eframe = { workspace = true, features = ["glow"] }
 
 # Cargo forbids inheriting workspace lints and overriding one of them, so this
 # crate spells its lints out. The workspace denies unsafe; JNI cannot be written
