@@ -68,34 +68,53 @@ ZenShare is that tool:
 
 ## Run it
 
-```sh
-cargo run --release
-```
+From a downloaded build, the binary is `zenshare` (inside `ZenShare.app` on
+macOS). From source, `cargo run --release --`.
 
-Two devices on one machine, to watch discovery and a real transfer:
-
-```sh
-cargo run --release -- --profile a
-cargo run --release -- --profile b
-```
-
-Each profile gets its own identity, so they see each other as two devices.
-
-Other commands:
+### Prove it works, with one machine
 
 ```sh
-cargo run --release -- doctor      # environment + identity + interfaces
-cargo run --release -- selftest --size-mb 512
-cargo run --release -- send big.zip --to 192.168.1.24:47820
-cargo run --release -- --demo      # populated window with sample data
+./zenshare selftest --size-mb 512
 ```
 
-`selftest` generates a payload, sends it through a real QUIC connection on
-loopback, and compares BLAKE3 hashes. It is the acceptance test for the engine.
+Generates a payload, pushes it through a real QUIC connection, and compares
+BLAKE3 hashes. If this passes, the transfer engine is sound on your machine. It
+needs no second device and no network — it is the fastest way to know whether
+anything here works.
 
-`send` is the headless sender: point it at a running ZenShare and it will push
-files to that window without opening one of its own. The receiver prints its
-listening address on startup, so this works on one machine too.
+### Send a real file into the window
+
+```sh
+./zenshare                      # in one terminal; prints "listening on <ip>:<port>"
+./zenshare send movie.mkv --to 127.0.0.1:<port>
+```
+
+The receiver prints its address on startup, so you can drive a full transfer into
+the GUI without a second machine. This is the most reliable demo, because it does
+not depend on discovery.
+
+### Two devices on one machine
+
+```sh
+./zenshare --profile a
+./zenshare --profile b
+```
+
+Each profile gets its own identity, so they appear to each other as two devices —
+**if** your network delivers multicast. Many corporate, guest and sandboxed
+networks drop it silently, in which case both windows will say "Looking for
+devices…" forever. That is a discovery limitation, not a transfer one; use
+`send --to` above to confirm the engine works.
+
+### Everything else
+
+```sh
+./zenshare doctor                  # identity, interfaces, downloads dir, QUIC bind
+./zenshare --demo                  # populated window with sample data
+./zenshare --on-top                # keep the window above everything else
+```
+
+`doctor` exits non-zero if something is wrong, so it is safe to use in scripts.
 
 ## Performance
 
