@@ -81,7 +81,8 @@ hashes. If that passes, the transfer path is sound.
 
 - **Android can receive but not send yet.** Picking a file on a phone needs the
   Storage Access Framework, which is the next piece of work. Received files land
-  in `Android/data/dev.zenshare.app/files/ZenShare`, visible over USB.
+  in `Android/media/dev.zenshare.app/ZenShare`, which any file manager on the
+  phone can open — Files, ZArchiver, whatever you use.
 - **No iOS build.** Same work as Android, plus a sandbox that forbids the
   multicast trick entirely.
 - **No browser version, and there cannot be one.** Browsers cannot open a raw

@@ -64,7 +64,7 @@ ZenShare is that tool:
 | Resume after disconnect | **not yet** — protocol field exists, wiring pending |
 | QR pairing | **not yet** |
 | WAN transfer (iroh) | **not yet** — feature-gated, phase 5 |
-| Android | **receives**; sending needs the Storage Access Framework |
+| Android | **receives** into `Android/media/dev.zenshare.app/ZenShare`; sending needs the Storage Access Framework |
 | iOS | **not yet** |
 
 ## Run it

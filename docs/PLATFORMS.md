@@ -33,8 +33,11 @@ What works today:
 - Discovers peers on the same Wi-Fi, which required a `WifiManager.MulticastLock`
   acquired over JNI — Android's Wi-Fi stack drops multicast packets without one,
   and discovery fails silently rather than reporting an error
-- Receives files into `Android/data/dev.zenshare.app/files/ZenShare`, visible
-  over USB and in file managers, with no storage permission required
+- Receives files into `Android/media/dev.zenshare.app/ZenShare`. That is shared
+  storage, so it needs no permission and every file manager can open it. The
+  first build used `Android/data/`, which since Android 11 no file manager on
+  the device can reach — the file arrived and was unreachable, which is the same
+  as not arriving
 
 What does not:
 
