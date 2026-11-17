@@ -85,6 +85,7 @@ mod android {
         init_logging();
         log::info!("ZenShare starting ({} build)", env!("CARGO_PKG_VERSION"));
 
+        log::info!("acquiring multicast lock");
         let _ = MULTICAST_LOCK.set(acquire_multicast_lock(&app));
 
         // Android has no $HOME. Internal storage is private and always writable;
@@ -145,11 +146,12 @@ mod android {
         let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) }.ok()?;
         let mut env = vm.attach_current_thread().ok()?;
 
-        // `activity_as_ptr` hands back a pointer to the reference, not the
-        // reference itself, so this is one dereference deep.
+        // `activity_as_ptr` returns a `*mut c_void` whose *value is* the jobject.
+        // Reinterpret the pointer, do not dereference it: casting to `jobject`
+        // first would make it a `*mut *mut _jobject` and reading through it
+        // would hand back the Java object's first field instead of the object.
         // SAFETY: the Activity reference is valid while android_main is running.
-        let activity_ref: *mut jobject = app.activity_as_ptr().cast();
-        let activity = unsafe { JObject::from_raw(*activity_ref) };
+        let activity = unsafe { JObject::from_raw(app.activity_as_ptr() as jobject) };
 
         let service = env.new_string("wifi").ok()?;
         let wifi = env

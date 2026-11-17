@@ -67,28 +67,9 @@ jobs:
           arch: x86_64
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
-          script: |
-            set -x
-            adb install -r dist/zenshare-0.0.0-smoke-android.apk || exit 1
-            adb logcat -c
-
-            adb shell am start -n dev.zenshare.app/android.app.NativeActivity
-            sleep 15
-
-            echo "===== zenshare log ====="
-            adb logcat -d -s zenshare:V | tail -80
-            echo "===== crashes ====="
-            adb logcat -d -b crash | tail -60
-
-            if adb shell pidof dev.zenshare.app > /dev/null 2>&1; then
-              echo "RESULT: app is still running"
-              adb exec-out screencap -p > screen.png
-              echo "RESULT: screenshot captured"
-            else
-              echo "RESULT: app is not running — it exited after launch"
-              adb exec-out screencap -p > screen.png || true
-              exit 1
-            fi
+          # One line on purpose: the runner executes `script` line by line, so a
+          # multi-line if/fi here would be split into separate shells.
+          script: bash .github/scripts/smoke-android.sh dist/zenshare-0.0.0-smoke-android.apk
 
       - name: Upload screenshot
         if: always()
