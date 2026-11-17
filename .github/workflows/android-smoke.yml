@@ -1,0 +1,99 @@
+name: Android smoke test
+
+# Boots a real Android emulator, installs the APK, launches it, and reports
+# whether it survived. This exists because "it installs but closes immediately"
+# is not diagnosable from a build log: the failure happens at runtime, inside
+# window creation, and the only witness is logcat.
+#
+# The APK ships an x86_64 library precisely so this can run without an ARM
+# emulator, which would be far too slow on CI.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master, main]
+    paths:
+      - "crates/zs-android/**"
+      - ".github/workflows/android-smoke.yml"
+
+concurrency:
+  group: android-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: read
+
+jobs:
+  emulator:
+    name: Launch on emulator
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-ndk
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-ndk
+
+      - name: Locate the NDK
+        run: |
+          if [ -n "${ANDROID_NDK_LATEST_HOME:-}" ]; then
+            echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+          elif [ -d "$ANDROID_HOME/ndk" ]; then
+            latest="$(ls "$ANDROID_HOME/ndk" | sort -V | tail -1)"
+            echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/$latest" >> "$GITHUB_ENV"
+          fi
+
+      - name: Build APK
+        run: bash .github/scripts/build-apk.sh 0.0.0-smoke
+
+      # Software rendering: CI runners have no GPU, and swiftshader still
+      # provides a real GLES 3 implementation, which is the path we ship.
+      - name: Run on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: |
+            set -x
+            adb install -r dist/zenshare-0.0.0-smoke-android.apk || exit 1
+            adb logcat -c
+
+            adb shell am start -n dev.zenshare.app/android.app.NativeActivity
+            sleep 15
+
+            echo "===== zenshare log ====="
+            adb logcat -d -s zenshare:V | tail -80
+            echo "===== crashes ====="
+            adb logcat -d -b crash | tail -60
+
+            if adb shell pidof dev.zenshare.app > /dev/null 2>&1; then
+              echo "RESULT: app is still running"
+              adb exec-out screencap -p > screen.png
+              echo "RESULT: screenshot captured"
+            else
+              echo "RESULT: app is not running — it exited after launch"
+              adb exec-out screencap -p > screen.png || true
+              exit 1
+            fi
+
+      - name: Upload screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: emulator-screen
+          path: screen.png
+          if-no-files-found: ignore
