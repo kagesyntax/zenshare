@@ -84,8 +84,11 @@ mod android {
         let vm = unsafe { JavaVM::from_raw(app.vm_as_ptr().cast()) }.ok()?;
         let mut env = vm.attach_current_thread().ok()?;
 
+        // `activity_as_ptr` hands back a pointer to the reference, not the
+        // reference itself, so this is one dereference deep.
         // SAFETY: the Activity reference is valid while android_main is running.
-        let activity = unsafe { JObject::from_raw(app.activity_as_ptr().cast::<jobject>()) };
+        let activity_ref: *mut jobject = app.activity_as_ptr().cast();
+        let activity = unsafe { JObject::from_raw(*activity_ref) };
 
         let service = env.new_string("wifi").ok()?;
         let wifi = env
