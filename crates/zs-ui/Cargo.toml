@@ -22,3 +22,8 @@ eframe = { workspace = true, features = ["accesskit"] }
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+# Headless rendering + snapshot comparison. Version-locked to our egui, so a
+# bump to egui is a bump here in the same commit or the harness refuses to build.
+egui_kittest = { version = "0.37", features = ["eframe", "snapshot", "wgpu"] }

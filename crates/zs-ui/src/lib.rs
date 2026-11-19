@@ -219,15 +219,26 @@ pub struct AppOptions {
 /// `NativeOptions` (it has to pass the `AndroidApp` handle) but must produce the
 /// exact same app.
 #[must_use]
+pub fn build_app(
+    cc: &eframe::CreationContext<'_>,
+    model: Arc<RwLock<UiModel>>,
+    actions: async_channel::Sender<UiAction>,
+    options: AppOptions,
+) -> App {
+    theme::install_fonts(&cc.egui_ctx);
+    theme::install_style(&cc.egui_ctx);
+    App::new(model, actions, options.demo)
+}
+
+/// Build the app for a given egui context, erased for eframe.
+#[must_use]
 pub fn make_app(
     cc: &eframe::CreationContext<'_>,
     model: Arc<RwLock<UiModel>>,
     actions: async_channel::Sender<UiAction>,
     options: AppOptions,
 ) -> Box<dyn eframe::App> {
-    theme::install_fonts(&cc.egui_ctx);
-    theme::install_style(&cc.egui_ctx);
-    Box::new(App::new(model, actions, options.demo))
+    Box::new(build_app(cc, model, actions, options))
 }
 
 /// Launch the desktop window. Blocks until the user closes it.
@@ -263,7 +274,9 @@ pub fn run(
     )
 }
 
-struct App {
+/// The application. Owns the model handle, the outbound command channel, and
+/// the transient UI state (selection, queue) that does not belong in the model.
+pub struct App {
     model: Arc<RwLock<UiModel>>,
     actions: async_channel::Sender<UiAction>,
     queue: Vec<QueuedFile>,
@@ -272,7 +285,13 @@ struct App {
 }
 
 impl App {
-    fn new(
+    /// Build the app directly, with a concrete type.
+    ///
+    /// [`make_app`] erases this to `Box<dyn eframe::App>`, which is what eframe
+    /// wants but what the snapshot harness cannot hold — it needs a sized `App`
+    /// so it can drive frames itself.
+    #[must_use]
+    pub fn new(
         model: Arc<RwLock<UiModel>>,
         actions: async_channel::Sender<UiAction>,
         demo: bool,
