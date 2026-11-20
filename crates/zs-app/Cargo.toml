@@ -25,7 +25,6 @@ tracing-subscriber.workspace = true
 blake3.workspace = true
 memmap2.workspace = true
 bytesize.workspace = true
-humantime.workspace = true
 directories.workspace = true
 
 # Handing a path to the OS file manager is a desktop idea.

@@ -45,9 +45,9 @@ impl AppPaths {
     /// file managers, so the user can actually get at what they received
     /// without a storage-permission dance.
     #[must_use]
-    pub fn android(internal: PathBuf, external: Option<PathBuf>) -> Self {
+    pub fn android(internal: &std::path::Path, external: Option<PathBuf>) -> Self {
         let downloads = external
-            .unwrap_or_else(|| internal.clone())
+            .unwrap_or_else(|| internal.to_path_buf())
             .join("ZenShare");
         Self {
             identity: internal.join("identity.key"),

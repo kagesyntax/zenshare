@@ -283,3 +283,17 @@ titlebar, and we can do that with `with_transparent` plus a solid fallback.
 through an MCP server. Its spring and stagger constants are useful as reference
 numbers (spring `2.0 / 0.70`, stagger 0.03–0.05s), and they informed the motion
 table, but nothing in it produces UI code.
+
+---
+
+## Status
+
+| Phase | State |
+|---|---|
+| 0 — Snapshot harness | **done.** Six fixtures, green in CI. |
+| 1 — Tokens | **done.** `theme.rs` rewritten. |
+| 2 — Primitives | **done.** `States`, `button`, `chip`, `divider`, `focus_ring`. |
+| 3 — Shell | **done.** Unified titlebar, sidebar, canvas, bottom panel; status bar deleted. |
+| 4 — Motion | not started. |
+| 5 — Narrow / Android | **layout done.** File picking still needs SAF. |
+| 6 — Keyboard and focus | not started. `focus_ring` exists but nothing draws it yet. |

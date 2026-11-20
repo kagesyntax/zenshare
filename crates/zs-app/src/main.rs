@@ -1,4 +1,4 @@
-//! ZenShare desktop entry point.
+//! `ZenShare` desktop entry point.
 //!
 //! All the interesting parts live in the library so the Android build can reuse
 //! them; this file is argument parsing and process setup.
@@ -159,6 +159,22 @@ async fn peers(seconds: u64, name: Option<String>) -> Result<()> {
     Ok(())
 }
 
+/// Human duration, without pulling in a crate for it.
+///
+/// `humantime` was a single call site and is flagged unmaintained by RUSTSEC;
+/// six lines is a better trade than an ignored advisory.
+fn fmt_elapsed(d: std::time::Duration) -> String {
+    let secs = d.as_secs();
+    let ms = d.subsec_millis();
+    if secs >= 60 {
+        format!("{}m {}s", secs / 60, secs % 60)
+    } else if secs > 0 {
+        format!("{secs}.{ms:03}s")
+    } else {
+        format!("{ms}ms")
+    }
+}
+
 fn doctor(profile: &str) -> Result<()> {
     println!("zenshare {}", env!("CARGO_PKG_VERSION"));
     println!("  protocol      v{}", zs_transfer::version());
@@ -296,7 +312,7 @@ async fn selftest(size_mb: u64, keep: bool) -> Result<()> {
     let mbps = total as f64 / elapsed.as_secs_f64() / (1024.0 * 1024.0);
     println!("integrity      ok");
     println!("moved          {}", bytesize::ByteSize(total));
-    println!("elapsed        {}", humantime::format_duration(elapsed));
+    println!("elapsed        {}", fmt_elapsed(elapsed));
     println!("throughput     {mbps:.1} MiB/s");
 
     if keep {

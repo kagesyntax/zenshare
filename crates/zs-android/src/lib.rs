@@ -113,7 +113,7 @@ mod android {
         });
         log::info!("external media dir: {media:?}");
 
-        let paths = Arc::new(AppPaths::android(internal, media));
+        let paths = Arc::new(AppPaths::android(&internal, media));
         log::info!("downloads dir: {}", paths.downloads.display());
         if let Err(e) = paths.ensure() {
             log::error!("could not create directories: {e:#}");
