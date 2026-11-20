@@ -42,7 +42,7 @@ const XFER_H: f32 = 64.0;
 /// Collapsed bottom panel.
 const BOTTOM_COLLAPSED: f32 = 36.0;
 /// Expanded bottom panel.
-const BOTTOM_EXPANDED: f32 = 220.0;
+const BOTTOM_EXPANDED: f32 = 240.0;
 /// Below this width the sidebar becomes a horizontal strip.
 const NARROW: f32 = 720.0;
 /// Height of that strip.
@@ -1061,15 +1061,28 @@ impl App {
             return;
         }
 
+        // How many rows actually fit, so the header can say what it is hiding
+        // rather than silently dropping transfers off the bottom edge.
+        let space = rect.height() - BOTTOM_COLLAPSED - theme::S2;
+        let visible = (space / XFER_H).floor().max(0.0) as usize;
+        let hidden = m.transfers.len().saturating_sub(visible);
+
+        if hidden > 0 {
+            widgets::text_right(
+                ui.painter(),
+                pos2(rect.max.x - theme::S5 - 16.0, header.center().y),
+                format!("+{hidden} more"),
+                theme::caption(),
+                theme::LABEL3,
+            );
+        }
+
         let mut y = rect.min.y + BOTTOM_COLLAPSED;
-        for (i, t) in m.transfers.iter().enumerate() {
+        for (i, t) in m.transfers.iter().take(visible).enumerate() {
             let row = Rect::from_min_size(
                 pos2(rect.min.x + theme::S5, y),
                 vec2(rect.width() - theme::S5 * 2.0, XFER_H),
             );
-            if row.max.y > rect.max.y - theme::S2 {
-                break;
-            }
             self.transfer_row(ui, row, t, i);
             y += XFER_H;
         }
