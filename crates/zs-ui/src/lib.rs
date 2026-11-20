@@ -1,29 +1,58 @@
-//! The `ZenShare` interface.
+//! The interface.
 //!
-//! Everything is painted directly onto one canvas. There is no widget theme to
-//! fight and no layout engine to negotiate with, which is what keeps the app
-//! from looking like every other egui project.
+//! Every control here is painted rather than instantiated. `ui.interact` over a
+//! computed rect gives a `Response`; the visual comes from `widgets`. That is
+//! the only way to hit exact metrics in egui, and it is what makes the snapshot
+//! harness meaningful — the output is our drawing, not a theme's.
 //!
-//! The UI owns exactly two things: the outgoing file queue and the selected
-//! peer. Everything else — peers, transfers, status — arrives as an immutable
-//! snapshot from the engine, so the render loop can never block on I/O.
+//! Layout is a single `Layout` struct computed once per frame, so panels cannot
+//! disagree about where they start. The previous version handed two panels the
+//! same rect and let them overlap.
+//!
+//! Design decisions and their reasoning live in `docs/UI-SYSTEM.md`.
 
-#![deny(missing_docs)]
-// Short closure and loop bindings (`|m|`, `|p|`, `for i in`) are idiomatic in
-// tight drawing code and add noise as long names.
+// `p`, `m`, `t`, `i` are the conventional bindings in a paint routine; long
+// names here would be noise, not clarity.
 #![allow(clippy::many_single_char_names)]
+
+use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
+use std::time::Duration;
+
+use egui::{Color32, Id, Rect, Sense, Stroke, pos2, vec2};
+use zs_core::{DeviceId, DeviceKind};
 
 pub mod theme;
 pub mod widgets;
 
-use egui::{Color32, Pos2, Rect, Sense, Stroke, StrokeKind, vec2};
-use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
-use std::time::Duration;
-use widgets::{Icon, ellipsize, fmt_bytes, fmt_eta, fmt_speed, icon, initial};
-use zs_core::{DeviceId, DeviceKind};
+use widgets::{ButtonKind, States};
 
-/// A peer as the UI sees it.
+// ---------------------------------------------------------------------------
+// Metrics
+// ---------------------------------------------------------------------------
+
+/// Unified titlebar: the only horizontal band at the top.
+const TITLE_H: f32 = 52.0;
+/// Sidebar width at the default window size.
+const SIDEBAR_W: f32 = 280.0;
+/// Device row height.
+const ROW_H: f32 = 52.0;
+/// Transfer row height.
+const XFER_H: f32 = 64.0;
+/// Collapsed bottom panel.
+const BOTTOM_COLLAPSED: f32 = 36.0;
+/// Expanded bottom panel.
+const BOTTOM_EXPANDED: f32 = 220.0;
+/// Below this width the sidebar becomes a horizontal strip.
+const NARROW: f32 = 720.0;
+/// Height of that strip.
+const STRIP_H: f32 = 88.0;
+
+// ---------------------------------------------------------------------------
+// Data
+// ---------------------------------------------------------------------------
+
+/// A device we can send to.
 #[derive(Clone, Debug)]
 pub struct Peer {
     /// Stable identity.
@@ -38,8 +67,8 @@ pub struct Peer {
     pub online: bool,
 }
 
-/// Lifecycle of one transfer row.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/// What a transfer is doing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TransferState {
     /// Waiting for the peer to accept.
     Pending,
@@ -71,23 +100,24 @@ pub struct TransferRow {
 }
 
 impl TransferRow {
-    /// Completion in `0.0..=1.0`.
+    /// 0.0 to 1.0.
     #[must_use]
     pub fn fraction(&self) -> f32 {
         if self.total == 0 {
-            1.0
+            0.0
         } else {
-            (self.bytes_done as f64 / self.total as f64) as f32
+            (self.bytes_done as f32 / self.total as f32).clamp(0.0, 1.0)
         }
     }
 
-    /// Seconds remaining, or `None` when unknown.
+    /// Seconds remaining at the current rate, if we are moving.
     #[must_use]
     pub fn eta_secs(&self) -> Option<f64> {
-        if self.speed_bps <= 1.0 || self.bytes_done >= self.total {
+        if self.state != TransferState::Active || self.speed_bps <= 1.0 {
             return None;
         }
-        Some((self.total - self.bytes_done) as f64 / self.speed_bps)
+        let left = self.total.saturating_sub(self.bytes_done) as f64;
+        Some(left / self.speed_bps)
     }
 }
 
@@ -131,7 +161,7 @@ pub struct UiModel {
     pub peers: Vec<Peer>,
     /// Transfers, newest first.
     pub transfers: Vec<TransferRow>,
-    /// One-line status shown at the bottom.
+    /// One-line status.
     pub status: String,
     /// What discovery is doing. Empty when normal; otherwise a short reason,
     /// because "0 devices" with no explanation is unactionable.
@@ -139,7 +169,7 @@ pub struct UiModel {
 }
 
 impl UiModel {
-    /// A populated model for design work and screenshots. Never used at runtime.
+    /// Sample data for design work and for the snapshot fixtures.
     #[must_use]
     pub fn demo() -> Self {
         Self {
@@ -189,7 +219,7 @@ impl UiModel {
 }
 
 /// Commands the UI sends to the engine.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum UiAction {
     /// Send `files` to `peer`.
     Send {
@@ -204,20 +234,37 @@ pub enum UiAction {
     RevealDownloads,
 }
 
+// ---------------------------------------------------------------------------
+// Construction
+// ---------------------------------------------------------------------------
+
 /// How the window should behave, separate from what it displays.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy)]
 pub struct AppOptions {
     /// Keep the window above everything else.
     pub on_top: bool,
     /// Fill the model with sample data instead of talking to an engine.
     pub demo: bool,
+    /// Leading inset for the macOS traffic lights when the window paints its own
+    /// titlebar. Zero everywhere else, including in tests.
+    pub titlebar_inset: f32,
 }
 
-/// Build the app for a given egui context.
+impl Default for AppOptions {
+    fn default() -> Self {
+        Self {
+            on_top: false,
+            demo: false,
+            titlebar_inset: 0.0,
+        }
+    }
+}
+
+/// Build the app directly, with a concrete type.
 ///
-/// Exposed separately from [`run`] because the Android build creates its own
-/// `NativeOptions` (it has to pass the `AndroidApp` handle) but must produce the
-/// exact same app.
+/// [`make_app`] erases this to `Box<dyn eframe::App>`, which is what eframe
+/// wants but what the snapshot harness cannot hold — it needs a sized `App`
+/// so it can drive frames itself.
 #[must_use]
 pub fn build_app(
     cc: &eframe::CreationContext<'_>,
@@ -227,7 +274,7 @@ pub fn build_app(
 ) -> App {
     theme::install_fonts(&cc.egui_ctx);
     theme::install_style(&cc.egui_ctx);
-    App::new(model, actions, options.demo)
+    App::new(model, actions, options)
 }
 
 /// Build the app for a given egui context, erased for eframe.
@@ -253,19 +300,29 @@ pub fn run(
 ) -> eframe::Result {
     let mut viewport = egui::ViewportBuilder::default()
         .with_inner_size([1080.0, 700.0])
-        // Small enough that a 1280x800 laptop does not fight it, and so the
-        // narrow layout can actually be reached by resizing.
         .with_min_inner_size([360.0, 480.0])
         .with_title("ZenShare");
 
-    // Keep the progress window above everything else while a transfer runs.
-    // Also handy for driving the app from a script or a screenshot harness.
+    // Let the content run underneath the titlebar so there is one horizontal
+    // band instead of a native one plus ours. The traffic lights need room.
+    #[cfg(target_os = "macos")]
+    let inset = 72.0;
+    #[cfg(not(target_os = "macos"))]
+    let inset = 0.0;
+
     if on_top || std::env::var_os("ZENSHARE_ON_TOP").is_some() {
         viewport = viewport.with_always_on_top();
     }
 
-    let options = eframe::NativeOptions { viewport, ..Default::default() };
-    let app_options = AppOptions { on_top, demo };
+    let options = eframe::NativeOptions {
+        viewport,
+        ..Default::default()
+    };
+    let app_options = AppOptions {
+        on_top,
+        demo,
+        titlebar_inset: inset,
+    };
 
     eframe::run_native(
         "ZenShare",
@@ -274,50 +331,124 @@ pub fn run(
     )
 }
 
+// ---------------------------------------------------------------------------
+// Layout
+// ---------------------------------------------------------------------------
+
+/// Where everything goes this frame. Computed once so panels cannot disagree.
+struct Layout {
+    title: Rect,
+    banner: Option<Rect>,
+    sidebar: Rect,
+    canvas: Rect,
+    bottom: Rect,
+    expanded: bool,
+    narrow: bool,
+}
+
+impl Layout {
+    fn compute(full: Rect, model: &UiModel, bottom_open: bool) -> Self {
+        let title = Rect::from_min_size(full.min, vec2(full.width(), TITLE_H));
+        let mut y = title.max.y;
+
+        let banner = if model.discovery.is_empty() {
+            None
+        } else {
+            let r = Rect::from_min_size(pos2(full.min.x, y), vec2(full.width(), 34.0));
+            y = r.max.y;
+            Some(r)
+        };
+
+        let expanded = bottom_open && !model.transfers.is_empty();
+        let bottom_h = if expanded {
+            BOTTOM_EXPANDED
+        } else {
+            BOTTOM_COLLAPSED
+        };
+        let bottom = Rect::from_min_max(pos2(full.min.x, full.max.y - bottom_h), full.max);
+        let body = Rect::from_min_max(pos2(full.min.x, y), pos2(full.max.x, bottom.min.y));
+        let narrow = full.width() < NARROW;
+
+        if narrow {
+            // Phone shape: devices become a horizontal strip above the canvas
+            // rather than a column that eats most of the width.
+            let strip_h = STRIP_H.min(body.height() * 0.4);
+            let sidebar = Rect::from_min_size(body.min, vec2(body.width(), strip_h));
+            let canvas = Rect::from_min_max(pos2(body.min.x, sidebar.max.y), body.max);
+            Self {
+                title,
+                banner,
+                sidebar,
+                canvas,
+                bottom,
+                expanded,
+                narrow,
+            }
+        } else {
+            let sidebar = Rect::from_min_size(body.min, vec2(SIDEBAR_W, body.height()));
+            let canvas = Rect::from_min_max(pos2(sidebar.max.x, body.min.y), body.max);
+            Self {
+                title,
+                banner,
+                sidebar,
+                canvas,
+                bottom,
+                expanded,
+                narrow,
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// App
+// ---------------------------------------------------------------------------
+
 /// The application. Owns the model handle, the outbound command channel, and
 /// the transient UI state (selection, queue) that does not belong in the model.
 pub struct App {
     model: Arc<RwLock<UiModel>>,
     actions: async_channel::Sender<UiAction>,
+    options: AppOptions,
     queue: Vec<QueuedFile>,
     selected: Option<DeviceId>,
-    demo: bool,
+    bottom_open: bool,
 }
 
 impl App {
     /// Build the app directly, with a concrete type.
-    ///
-    /// [`make_app`] erases this to `Box<dyn eframe::App>`, which is what eframe
-    /// wants but what the snapshot harness cannot hold — it needs a sized `App`
-    /// so it can drive frames itself.
     #[must_use]
     pub fn new(
         model: Arc<RwLock<UiModel>>,
         actions: async_channel::Sender<UiAction>,
-        demo: bool,
+        options: AppOptions,
     ) -> Self {
         Self {
             model,
             actions,
+            options,
             queue: Vec::new(),
             selected: None,
-            demo,
+            bottom_open: true,
         }
     }
 
     /// In demo mode the active row advances, so the window visibly animates and
     /// a screenshot taken later proves the paint loop is running.
     fn tick_demo(&mut self) {
-        if !self.demo {
+        if !self.options.demo {
             return;
         }
-        if let Ok(mut m) = self.model.write()
-            && let Some(row) = m
-                .transfers
-                .iter_mut()
-                .find(|t| t.state == TransferState::Active)
-        {
-            row.bytes_done = (row.bytes_done + 24_000_000).min(row.total);
+        let Ok(mut m) = self.model.write() else {
+            return;
+        };
+        for t in &mut m.transfers {
+            if t.state == TransferState::Active {
+                t.bytes_done = (t.bytes_done + 24_000_000).min(t.total);
+                if t.bytes_done >= t.total {
+                    t.state = TransferState::Done;
+                }
+            }
         }
     }
 
@@ -326,10 +457,8 @@ impl App {
     }
 
     fn add_files(&mut self, paths: Vec<PathBuf>) {
-        for p in paths {
-            if let Some(q) = QueuedFile::new(p)
-                && !self.queue.iter().any(|e| e.path == q.path)
-            {
+        for path in paths {
+            if let Some(q) = QueuedFile::new(path) {
                 self.queue.push(q);
             }
         }
@@ -349,14 +478,23 @@ impl App {
         // receive but not send, and the UI says so rather than offering a
         // button that silently does nothing.
     }
+
+    fn send(&mut self) {
+        let Some(peer) = self.selected else { return };
+        if self.queue.is_empty() {
+            return;
+        }
+        let files: Vec<PathBuf> = self.queue.iter().map(|q| q.path.clone()).collect();
+        let _ = self.actions.try_send(UiAction::Send { peer, files });
+        self.queue.clear();
+    }
 }
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let full = ui.max_rect();
-        ui.painter().rect_filled(full, widgets::cr(0), theme::BG);
+        ui.painter().rect_filled(full, 0, theme::BG);
 
-        // Files dropped onto the window.
         let dropped: Vec<PathBuf> = ui.ctx().input(|i| {
             i.raw
                 .dropped_files
@@ -370,52 +508,24 @@ impl eframe::App for App {
 
         self.tick_demo();
         let m = self.snapshot();
+        let layout = Layout::compute(full, &m, self.bottom_open);
 
-        let pad = 26.0;
-        let header_h = 76.0;
+        self.titlebar(ui, layout.title, &m);
+        if let Some(banner) = layout.banner {
+            Self::banner(ui, banner, &m.discovery);
+        }
 
-        Self::top_bar(ui, full, pad, header_h, &m);
-
-        let body_top = header_h + 6.0;
-        let body_bottom = full.height() - 30.0;
-        let left_x = pad;
-        let left_w = (full.width() * 0.38).clamp(320.0, 400.0);
-        let right_x = left_x + left_w + pad;
-        let right_w = full.width() - right_x - pad;
-
-        self.devices_panel(
-            ui,
-            Rect::from_min_max(
-                Pos2::new(left_x, body_top),
-                Pos2::new(left_x + left_w, body_bottom),
-            ),
-            &m,
-        );
-
-        self.transfers_panel(
-            ui,
-            Rect::from_min_max(
-                Pos2::new(left_x, body_top),
-                Pos2::new(left_x + left_w, body_bottom),
-            ),
-            &m,
-        );
-
-        self.send_panel(
-            ui,
-            Rect::from_min_max(
-                Pos2::new(right_x, body_top),
-                Pos2::new(right_x + right_w, body_bottom),
-            ),
-            &m,
-        );
-
-        Self::status_bar(ui, full, pad, &m);
+        if layout.narrow {
+            self.device_strip(ui, layout.sidebar, &m);
+        } else {
+            self.sidebar(ui, layout.sidebar, &m);
+        }
+        self.canvas(ui, layout.canvas, &m, layout.narrow);
+        self.bottom_panel(ui, layout.bottom, &m, layout.expanded);
 
         // egui only repaints on input by default. The engine mutates the model
         // from another thread and cannot poke the window, so we tick: fast while
-        // something is moving, slowly when idle. Without this the window shows a
-        // stale frame until the mouse moves.
+        // something is moving, slowly when idle.
         let busy = m
             .transfers
             .iter()
@@ -428,535 +538,627 @@ impl eframe::App for App {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Chrome
+// ---------------------------------------------------------------------------
+
 impl App {
-    fn top_bar(ui: &mut egui::Ui, full: Rect, pad: f32, h: f32, m: &UiModel) {
+    fn titlebar(&mut self, ui: &mut egui::Ui, rect: Rect, m: &UiModel) {
         let p = ui.painter();
-        let cy = h / 2.0;
+        p.rect_filled(rect, 0, theme::PANEL);
+        widgets::divider(p, rect.min.x, rect.max.x, rect.max.y - 0.5);
 
-        // Logo mark.
-        let mark = Rect::from_center_size(Pos2::new(pad + 17.0, cy), vec2(34.0, 34.0));
-        p.rect_filled(mark, widgets::cr(10), theme::ACCENT.gamma_multiply(0.14));
-        p.rect_stroke(
-            mark,
-            widgets::cr(10),
-            Stroke::new(1.0, theme::ACCENT.gamma_multiply(0.30)),
-            StrokeKind::Inside,
-        );
-        icon(p, mark.center(), 17.0, Icon::Send, theme::ACCENT);
+        let x = rect.min.x + self.options.titlebar_inset + theme::S5;
+        let cy = rect.center().y;
 
+        let mark = Rect::from_center_size(pos2(x + 11.0, cy), vec2(22.0, 22.0));
+        p.rect_filled(mark, widgets::cr(theme::R_CONTROL), theme::accent_wash());
+        widgets::icon(p, mark.center(), 13.0, widgets::Icon::Send, theme::ACCENT);
         widgets::text_left(
             p,
-            Pos2::new(pad + 46.0, cy),
+            pos2(mark.max.x + theme::S3, cy),
             "ZenShare",
-            theme::bold(19.0),
-            theme::TEXT,
+            theme::title1(),
+            theme::LABEL,
         );
 
-        // This device, on the right. The port lives in the status bar; repeating
-        // it here only ever caused the label to clip.
-        let label = ellipsize(&m.my_name, 24);
-        let text_w = label.chars().count() as f32 * 6.3;
-        let w = (text_w + 44.0).clamp(120.0, 260.0);
-        let chip = Rect::from_min_size(Pos2::new(full.width() - pad - w, cy - 16.0), vec2(w, 32.0));
-        widgets::pill(p, chip, theme::SURFACE);
-        p.circle_filled(Pos2::new(chip.min.x + 15.0, cy), 3.5, theme::ACCENT);
+        // This device. Identity, not an action, so a quiet chip rather than a
+        // button.
+        let name = widgets::ellipsize(&m.my_name, 26);
+        let w = (name.chars().count() as f32 * 6.6).clamp(70.0, 210.0) + 34.0;
+        let chip = Rect::from_min_size(pos2(rect.max.x - theme::S5 - w, cy - 12.0), vec2(w, 24.0));
+        p.rect_filled(chip, widgets::cr(theme::R_PILL), theme::RAISED);
+        p.circle_filled(pos2(chip.min.x + 12.0, cy), 3.0, theme::PROGRESS);
         widgets::text_left(
             p,
-            Pos2::new(chip.min.x + 27.0, cy),
-            label,
-            theme::regular(12.5),
-            theme::TEXT_DIM,
-        );
-
-        // Hairline under the bar.
-        p.line_segment(
-            [Pos2::new(pad, h), Pos2::new(full.width() - pad, h)],
-            Stroke::new(1.0, theme::BORDER.gamma_multiply(0.7)),
+            pos2(chip.min.x + 22.0, cy),
+            name,
+            theme::caption(),
+            theme::LABEL2,
         );
     }
 
-    fn devices_panel(&mut self, ui: &mut egui::Ui, area: Rect, m: &UiModel) {
-        let p = ui.painter().clone();
-        let mut y = area.min.y + 8.0;
+    fn banner(ui: &mut egui::Ui, rect: Rect, message: &str) {
+        let p = ui.painter();
+        p.rect_filled(rect, 0, theme::WARN.gamma_multiply(0.10));
+        widgets::divider(p, rect.min.x, rect.max.x, rect.max.y - 0.5);
 
-        widgets::text_left(
-            &p,
-            Pos2::new(area.min.x, y + 8.0),
-            "Nearby",
-            theme::bold(13.0),
-            theme::TEXT,
+        widgets::icon(
+            p,
+            pos2(rect.min.x + theme::S5, rect.center().y),
+            11.0,
+            widgets::Icon::Close,
+            theme::WARN,
         );
-        let count = format!("{}", m.peers.len());
-        let cw = 26.0;
-        let chip = Rect::from_min_size(Pos2::new(area.min.x + 66.0, y), vec2(cw, 18.0));
-        widgets::pill(&p, chip, theme::SURFACE_HI);
-        widgets::text_center(&p, chip.center(), count, theme::mono(11.0), theme::TEXT_DIM);
+        widgets::text_left(
+            p,
+            pos2(rect.min.x + theme::S5 + 18.0, rect.center().y),
+            widgets::ellipsize(message, 110),
+            theme::callout(),
+            theme::WARN,
+        );
+    }
 
-        y += 30.0;
+    fn section_header(p: &egui::Painter, x: f32, y: f32, text: &str, count: usize) {
+        widgets::text_left(p, pos2(x, y), text, theme::label(), theme::LABEL3);
 
-        let row_h = 70.0;
-        let gap = 8.0;
-        // Reserve room for the transfer list when there is one.
-        let reserve = if m.transfers.is_empty() { 0.0 } else { 232.0 };
-        let max_rows = (((area.height() - 30.0 - reserve) / (row_h + gap)) as usize).max(1);
+        if count > 0 {
+            let chip = Rect::from_min_size(
+                pos2(x + text.chars().count() as f32 * 7.0 + theme::S2, y - 7.0),
+                vec2(18.0, 14.0),
+            );
+            widgets::chip(p, chip, &count.to_string(), theme::LABEL2);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Devices
+// ---------------------------------------------------------------------------
+
+impl App {
+    fn sidebar(&mut self, ui: &mut egui::Ui, rect: Rect, m: &UiModel) {
+        let p = ui.painter();
+        p.rect_filled(rect, 0, theme::PANEL);
+        widgets::vdivider(p, rect.max.x - 0.5, rect.min.y, rect.max.y);
+
+        let mut y = rect.min.y + theme::S5;
+        Self::section_header(p, rect.min.x + theme::S5, y, "NEARBY", m.peers.len());
+        y += theme::S5;
 
         if m.peers.is_empty() {
-            draw_empty_state(&p, area, y, &m.discovery);
+            Self::empty_peers(p, rect, y);
             return;
         }
 
-        for (i, peer) in m.peers.iter().take(max_rows).enumerate() {
-            let rect = Rect::from_min_size(Pos2::new(area.min.x, y), vec2(area.width(), row_h));
-            let id = ui.scope_id().with(("peer", i));
-            let resp = ui.interact(rect, id, Sense::click());
-            let hover = ui
-                .ctx()
-                .animate_bool_with_time(id.with("h"), resp.hovered(), 0.12);
-            let selected = self.selected == Some(peer.id);
-
-            let fill = if selected {
-                theme::ACCENT.gamma_multiply(0.10)
-            } else {
-                theme::SURFACE.gamma_multiply(0.55 + 0.45 * hover)
-            };
-            let border = if selected {
-                theme::ACCENT.gamma_multiply(0.45)
-            } else {
-                theme::BORDER.gamma_multiply(0.6 + 0.4 * hover)
-            };
-            widgets::card_bordered(&p, rect, fill, border, theme::RADIUS);
-
-            let cx = rect.min.x + 40.0;
-            widgets::avatar(
-                &p,
-                Pos2::new(cx, rect.center().y),
-                21.0,
-                u32::from(peer.id.0[0]),
-                &initial(&peer.name),
-            );
-
-            let name = ellipsize(&peer.name, 24);
-            widgets::text_left(
-                &p,
-                Pos2::new(rect.min.x + 72.0, rect.center().y - 10.0),
-                name,
-                theme::medium(14.0),
-                theme::TEXT,
-            );
-            let sub = format!("{}  ·  {}", kind_label(peer.kind), peer.addr);
-            widgets::text_left(
-                &p,
-                Pos2::new(rect.min.x + 72.0, rect.center().y + 10.0),
-                ellipsize(&sub, 30),
-                theme::regular(11.5),
-                theme::TEXT_FAINT,
-            );
-
-            if selected {
-                icon(
-                    &p,
-                    Pos2::new(rect.max.x - 26.0, rect.center().y),
-                    16.0,
-                    Icon::Check,
-                    theme::ACCENT,
-                );
-            } else if hover > 0.5 {
-                icon(
-                    &p,
-                    Pos2::new(rect.max.x - 26.0, rect.center().y),
-                    14.0,
-                    Icon::Chevron,
-                    theme::TEXT_DIM,
-                );
+        let row_w = rect.width() - theme::S5 * 2.0;
+        for (i, peer) in m.peers.iter().enumerate() {
+            let row = Rect::from_min_size(pos2(rect.min.x + theme::S5, y), vec2(row_w, ROW_H));
+            if row.max.y > rect.max.y {
+                break;
             }
+            self.device_row(ui, row, peer, i);
+            y += ROW_H + theme::S2;
+        }
+    }
+
+    fn device_strip(&mut self, ui: &mut egui::Ui, rect: Rect, m: &UiModel) {
+        let p = ui.painter();
+        p.rect_filled(rect, 0, theme::PANEL);
+        widgets::divider(p, rect.min.x, rect.max.x, rect.max.y - 0.5);
+
+        Self::section_header(
+            p,
+            rect.min.x + theme::S3,
+            rect.min.y + theme::S3 + 5.0,
+            "NEARBY",
+            m.peers.len(),
+        );
+
+        if m.peers.is_empty() {
+            widgets::text_left(
+                p,
+                pos2(rect.min.x + theme::S3, rect.min.y + 48.0),
+                "Looking for devices…",
+                theme::callout(),
+                theme::LABEL3,
+            );
+            return;
+        }
+
+        // Horizontal chips: a phone has width and no height to spare.
+        let mut x = rect.min.x + theme::S3;
+        let y = rect.min.y + 34.0;
+        let h = 44.0;
+        for (i, peer) in m.peers.iter().enumerate() {
+            let w = (peer.name.chars().count() as f32 * 7.0 + 52.0).clamp(110.0, 180.0);
+            if x + w > rect.max.x - theme::S3 {
+                break;
+            }
+            let r = Rect::from_min_size(pos2(x, y), vec2(w, h));
+            let resp = ui.interact(r, Id::unique(("peer-strip", i)), Sense::click());
+            let selected = self.selected == Some(peer.id);
+            let st = States::of(&resp, selected, true);
+            let pp = ui.painter();
+
+            let fill = if st.selected {
+                theme::accent_wash()
+            } else if st.hovered {
+                theme::RAISED
+            } else {
+                Color32::TRANSPARENT
+            };
+            if fill != Color32::TRANSPARENT {
+                pp.rect_filled(r, widgets::cr(theme::R_CARD), fill);
+            }
+
+            widgets::avatar(
+                pp,
+                pos2(r.min.x + 20.0, r.center().y),
+                13.0,
+                i as u32,
+                &widgets::initial(&peer.name),
+            );
+            widgets::text_left(
+                pp,
+                pos2(r.min.x + 38.0, r.center().y),
+                widgets::ellipsize(&peer.name, 14),
+                theme::headline(),
+                theme::LABEL,
+            );
 
             if resp.clicked() {
                 self.selected = Some(peer.id);
             }
-
-            y += row_h + gap;
+            x += w + theme::S2;
         }
     }
 
-    fn transfers_panel(&mut self, ui: &mut egui::Ui, area: Rect, m: &UiModel) {
-        if m.transfers.is_empty() {
-            return;
-        }
-        let p = ui.painter().clone();
-        let rows = m.transfers.len().min(2);
-        let block_h = 30.0 + rows as f32 * 88.0;
-        let mut y = area.max.y - block_h;
-
-        widgets::text_left(
-            &p,
-            Pos2::new(area.min.x, y + 8.0),
-            "Transfers",
-            theme::bold(13.0),
-            theme::TEXT,
-        );
-        y += 28.0;
-
-        for (i, t) in m.transfers.iter().take(rows).enumerate() {
-            let rect = Rect::from_min_size(Pos2::new(area.min.x, y), vec2(area.width(), 80.0));
-            widgets::card_bordered(&p, rect, theme::SURFACE, theme::BORDER, theme::RADIUS);
-
-            let accent = if t.state == TransferState::Failed {
-                theme::DANGER
-            } else {
-                theme::ACCENT
-            };
-
-            widgets::text_left(
-                &p,
-                Pos2::new(rect.min.x + 16.0, rect.min.y + 22.0),
-                ellipsize(&t.file, 26),
-                theme::medium(13.0),
-                theme::TEXT,
-            );
-            widgets::text_right(
-                &p,
-                Pos2::new(rect.max.x - 16.0, rect.min.y + 22.0),
-                format!("{:.0}%", t.fraction() * 100.0),
-                theme::mono(12.0),
-                accent,
-            );
-
-            let bar = Rect::from_min_size(
-                Pos2::new(rect.min.x + 16.0, rect.min.y + 40.0),
-                vec2(rect.width() - 32.0, 5.0),
-            );
-            widgets::progress(&p, bar, t.fraction(), accent);
-
-            let detail = match t.state {
-                TransferState::Done => format!("{}  ·  complete", fmt_bytes(t.total)),
-                TransferState::Failed => format!("{}  ·  failed", fmt_bytes(t.bytes_done)),
-                TransferState::Pending => "waiting for the other device…".to_string(),
-                TransferState::Active => {
-                    let eta = t.eta_secs().map_or_else(|| "—".to_string(), fmt_eta);
-                    format!(
-                        "{}  ·  {}  ·  {} left",
-                        fmt_bytes(t.bytes_done),
-                        fmt_speed(t.speed_bps),
-                        eta
-                    )
-                }
-            };
-            widgets::text_left(
-                &p,
-                Pos2::new(rect.min.x + 16.0, rect.min.y + 60.0),
-                detail,
-                theme::mono(11.0),
-                theme::TEXT_FAINT,
-            );
-
-            let close = Rect::from_center_size(
-                Pos2::new(rect.max.x - 22.0, rect.min.y + 60.0),
-                vec2(18.0, 18.0),
-            );
-            let cresp = ui.interact(close, ui.scope_id().with(("cancel", i)), Sense::click());
-            if cresp.hovered() {
-                p.rect_filled(close, widgets::cr(4), theme::SURFACE_HI);
-            }
-            icon(&p, close.center(), 12.0, Icon::Close, theme::TEXT_FAINT);
-            if cresp.clicked() {
-                let _ = self.actions.try_send(UiAction::Cancel(t.id.clone()));
-            }
-
-            y += 88.0;
-        }
-    }
-
-    // A panel is a linear list of draw calls; splitting it would only move
-    // parameters around.
-    #[allow(clippy::too_many_lines)]
-    fn send_panel(&mut self, ui: &mut egui::Ui, area: Rect, m: &UiModel) {
-        let p = ui.painter().clone();
-        widgets::card_bordered(&p, area, theme::SURFACE, theme::BORDER, 16);
-
-        let pad = 20.0;
-        let inner = area.shrink(pad);
-        let mut y = inner.min.y;
-
-        widgets::text_left(
-            &p,
-            Pos2::new(inner.min.x, y + 6.0),
-            "Send",
-            theme::bold(15.0),
-            theme::TEXT,
-        );
-        let total: u64 = self.queue.iter().map(|q| q.size).sum();
-        if !self.queue.is_empty() {
-            widgets::text_right(
-                &p,
-                Pos2::new(inner.max.x, y + 6.0),
-                format!("{} files  ·  {}", self.queue.len(), fmt_bytes(total)),
-                theme::mono(11.0),
-                theme::TEXT_FAINT,
-            );
-        }
-        y += 26.0;
-
-        // Button geometry reserved from the bottom.
-        let btn_h = 46.0;
-        let btn = Rect::from_min_size(
-            Pos2::new(inner.min.x, inner.max.y - btn_h),
-            vec2(inner.width(), btn_h),
-        );
-
-        let drop_top = y;
-        let drop_bottom = if self.queue.is_empty() {
-            btn.min.y - 18.0
-        } else {
-            y + 132.0
-        };
-        let drop = Rect::from_min_max(
-            Pos2::new(inner.min.x, drop_top),
-            Pos2::new(inner.max.x, drop_bottom.max(drop_top + 90.0)),
-        );
-
-        let did = ui.scope_id().with("dropzone");
-        let dresp = ui.interact(drop, did, Sense::click());
-        let dhover = ui
-            .ctx()
-            .animate_bool_with_time(did.with("h"), dresp.hovered(), 0.12);
-
-        let fill = theme::SURFACE_HI.gamma_multiply(0.35 + 0.45 * dhover);
-        p.rect_filled(drop, widgets::cr(theme::RADIUS), fill);
-        p.rect_stroke(
-            drop,
-            widgets::cr(theme::RADIUS),
-            Stroke::new(1.0, theme::BORDER.gamma_multiply(0.8 + 0.2 * dhover)),
-            StrokeKind::Inside,
-        );
-
-        if self.queue.is_empty() {
-            let c = drop.center();
-            icon(
-                &p,
-                Pos2::new(c.x, c.y - 34.0),
-                26.0,
-                Icon::Folder,
-                theme::TEXT_FAINT,
-            );
-            #[cfg(not(target_os = "android"))]
-            let (title, hint) = ("Drop files here", "or click to browse");
-            #[cfg(target_os = "android")]
-            let (title, hint) = (
-                "Ready to receive",
-                "sending from this phone is not wired up yet",
-            );
-
-            widgets::text_center(
-                &p,
-                Pos2::new(c.x, c.y + 2.0),
-                title,
-                theme::medium(14.5),
-                theme::TEXT,
-            );
-            widgets::text_center(
-                &p,
-                Pos2::new(c.x, c.y + 24.0),
-                hint,
-                theme::regular(12.0),
-                theme::TEXT_FAINT,
-            );
-            if dresp.clicked() {
-                self.pick_files();
-            }
-        } else {
-            if dresp.clicked() {
-                self.pick_files();
-            }
-            let mut ry = drop.min.y + 12.0;
-            let row_h = 38.0;
-            let max_rows = (((drop.height() - 20.0) / row_h) as usize).max(1);
-            let shown = self.queue.len().min(max_rows);
-
-            for i in 0..shown {
-                let f = &self.queue[i];
-                let r = Rect::from_min_size(
-                    Pos2::new(drop.min.x + 12.0, ry),
-                    vec2(drop.width() - 24.0, row_h),
-                );
-                widgets::text_left(
-                    &p,
-                    Pos2::new(r.min.x + 6.0, r.center().y),
-                    ellipsize(&f.name(), 30),
-                    theme::regular(12.5),
-                    theme::TEXT,
-                );
-                widgets::text_right(
-                    &p,
-                    Pos2::new(r.max.x - 24.0, r.center().y),
-                    fmt_bytes(f.size),
-                    theme::mono(10.5),
-                    theme::TEXT_FAINT,
-                );
-
-                let x = Rect::from_center_size(
-                    Pos2::new(r.max.x - 8.0, r.center().y),
-                    vec2(16.0, 16.0),
-                );
-                let xr = ui.interact(x, ui.scope_id().with(("rm", i)), Sense::click());
-                icon(
-                    &p,
-                    x.center(),
-                    11.0,
-                    Icon::Close,
-                    if xr.hovered() {
-                        theme::DANGER
-                    } else {
-                        theme::TEXT_FAINT
-                    },
-                );
-                if xr.clicked() {
-                    self.queue.remove(i);
-                    break;
-                }
-                ry += row_h;
-            }
-
-            if self.queue.len() > shown {
-                widgets::text_left(
-                    &p,
-                    Pos2::new(drop.min.x + 18.0, ry + 6.0),
-                    format!("+{} more", self.queue.len() - shown),
-                    theme::regular(11.0),
-                    theme::TEXT_FAINT,
-                );
-            }
-        }
-
-        // Destination line above the button.
-        let dest_y = btn.min.y - 22.0;
-        let (dest_text, dest_color) = match self
-            .selected
-            .and_then(|id| m.peers.iter().find(|x| x.id == id))
-        {
-            Some(peer) => (format!("to {}", peer.name), theme::TEXT_DIM),
-            None if m.peers.is_empty() => ("no device selected".to_string(), theme::TEXT_FAINT),
-            None => ("select a device above".to_string(), theme::TEXT_FAINT),
-        };
-        widgets::text_left(
-            &p,
-            Pos2::new(inner.min.x, dest_y),
-            dest_text,
-            theme::regular(11.5),
-            dest_color,
-        );
-
-        let enabled = !self.queue.is_empty() && self.selected.is_some();
-        let bid = ui.scope_id().with("sendbtn");
-        let bresp = ui.interact(
-            btn,
-            bid,
-            if enabled {
-                Sense::click()
-            } else {
-                Sense::hover()
-            },
-        );
-        let bhover =
-            ui.ctx()
-                .animate_bool_with_time(bid.with("h"), bresp.hovered() && enabled, 0.10);
-
-        let fill = if enabled {
-            theme::ACCENT.gamma_multiply(0.88 + 0.12 * bhover)
-        } else {
-            theme::SURFACE_HI
-        };
-        p.rect_filled(btn, widgets::cr(12), fill);
-        let label_color = if enabled {
-            Color32::from_rgb(0x05, 0x14, 0x0F)
-        } else {
-            theme::TEXT_FAINT
-        };
-        let label = if enabled {
-            "Send"
-        } else {
-            "Select a device and files"
-        };
-        widgets::text_center(&p, btn.center(), label, theme::medium(14.0), label_color);
-
-        if bresp.clicked()
-            && enabled
-            && let Some(peer) = self.selected
-        {
-            let files: Vec<PathBuf> = self.queue.iter().map(|q| q.path.clone()).collect();
-            let _ = self.actions.try_send(UiAction::Send { peer, files });
-            self.queue.clear();
-        }
-    }
-
-    fn status_bar(ui: &mut egui::Ui, full: Rect, pad: f32, m: &UiModel) {
+    fn device_row(&mut self, ui: &mut egui::Ui, rect: Rect, peer: &Peer, index: usize) {
+        let resp = ui.interact(rect, Id::unique(("peer", index)), Sense::click());
+        let selected = self.selected == Some(peer.id);
+        let st = States::of(&resp, selected, true);
         let p = ui.painter();
-        let y = full.height() - 15.0;
-        let text = if m.status.is_empty() {
-            "encrypted end to end · no account · no telemetry"
+
+        let fill = if st.selected {
+            theme::accent_wash()
+        } else if st.hovered {
+            theme::RAISED
         } else {
-            m.status.as_str()
+            Color32::TRANSPARENT
         };
-        widgets::text_left(
+        if fill != Color32::TRANSPARENT {
+            p.rect_filled(rect, widgets::cr(theme::R_CARD), fill);
+        }
+
+        widgets::avatar(
             p,
-            Pos2::new(pad, y),
-            text,
-            theme::regular(10.5),
-            theme::TEXT_FAINT,
+            pos2(rect.min.x + 26.0, rect.center().y),
+            15.0,
+            index as u32,
+            &widgets::initial(&peer.name),
         );
 
-        let hint = "drop files anywhere";
-        widgets::text_right(
+        widgets::text_left(
             p,
-            Pos2::new(full.width() - pad, y),
-            hint,
-            theme::regular(10.5),
-            theme::TEXT_FAINT,
+            pos2(rect.min.x + 52.0, rect.center().y - 9.0),
+            widgets::ellipsize(&peer.name, 22),
+            theme::headline(),
+            theme::LABEL,
+        );
+        widgets::text_left(
+            p,
+            pos2(rect.min.x + 52.0, rect.center().y + 8.0),
+            format!("{} · {}", kind_label(peer.kind), peer.addr),
+            theme::caption(),
+            theme::LABEL3,
+        );
+
+        if peer.online {
+            p.circle_filled(
+                pos2(rect.max.x - 16.0, rect.center().y),
+                3.0,
+                theme::PROGRESS,
+            );
+        }
+
+        if resp.clicked() {
+            self.selected = Some(peer.id);
+        }
+        if st.hovered {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+    }
+
+    fn empty_peers(p: &egui::Painter, rect: Rect, y: f32) {
+        let card = Rect::from_min_size(
+            pos2(rect.min.x + theme::S5, y),
+            vec2(rect.width() - theme::S5 * 2.0, 96.0),
+        );
+        p.rect_filled(card, widgets::cr(theme::R_CARD), theme::RAISED);
+
+        widgets::text_left(
+            p,
+            pos2(card.min.x + theme::S4, card.min.y + 28.0),
+            "No devices yet",
+            theme::callout(),
+            theme::LABEL2,
+        );
+        widgets::text_left(
+            p,
+            pos2(card.min.x + theme::S4, card.min.y + 50.0),
+            "Same Wi-Fi, both apps open.",
+            theme::caption(),
+            theme::LABEL3,
+        );
+        widgets::text_left(
+            p,
+            pos2(card.min.x + theme::S4, card.min.y + 68.0),
+            "Guest networks often block discovery.",
+            theme::caption(),
+            theme::LABEL3,
         );
     }
 }
 
-/// What the device list shows before anything is discovered. Deliberately tells
-/// the user what to do rather than only that something is empty.
-fn draw_empty_state(p: &egui::Painter, area: Rect, y: f32, note: &str) {
-    let r = Rect::from_min_size(Pos2::new(area.min.x, y), vec2(area.width(), 104.0));
-    widgets::card_bordered(p, r, theme::SURFACE, theme::BORDER, theme::RADIUS);
+// ---------------------------------------------------------------------------
+// Canvas
+// ---------------------------------------------------------------------------
 
-    let mut lines = vec![
-        (
-            "Looking for devices…".to_string(),
-            theme::medium(13.5),
-            theme::TEXT_DIM,
-            30.0,
-        ),
-        (
-            "Both devices must be on the same Wi-Fi.".to_string(),
-            theme::regular(12.0),
-            theme::TEXT_FAINT,
-            54.0,
-        ),
-    ];
+impl App {
+    fn canvas(&mut self, ui: &mut egui::Ui, rect: Rect, m: &UiModel, narrow: bool) {
+        ui.painter().rect_filled(rect, 0, theme::BG);
 
-    // When discovery knows it is broken, say so here. An empty list with no
-    // explanation sends people hunting for a network problem that may not exist.
-    if note.is_empty() {
-        lines.push((
-            "Ask the other device to open ZenShare.".to_string(),
-            theme::regular(12.0),
-            theme::TEXT_FAINT,
-            74.0,
-        ));
-    } else {
-        lines.push((note.to_string(), theme::regular(12.0), theme::DANGER, 74.0));
+        let pad = if narrow { theme::S3 } else { theme::S5 };
+        let area = Rect::from_min_max(
+            pos2(rect.min.x + pad, rect.min.y + pad),
+            pos2(rect.max.x - pad, rect.max.y - pad),
+        );
+
+        let cta_h = 34.0;
+        let drop = Rect::from_min_max(area.min, pos2(area.max.x, area.max.y - cta_h - theme::S4));
+
+        if self.queue.is_empty() {
+            self.drop_zone(ui, drop);
+        } else {
+            self.queue_list(ui, drop);
+        }
+
+        let enabled = !self.queue.is_empty() && self.selected.is_some();
+        let label = if self.queue.is_empty() {
+            "Choose files"
+        } else {
+            "Send"
+        };
+        let w = 132.0;
+        let btn = Rect::from_min_size(pos2(area.max.x - w, area.max.y - cta_h), vec2(w, cta_h));
+        let resp = ui.interact(btn, Id::unique("cta"), Sense::click());
+        let st = States::of(&resp, false, enabled);
+        let kind = if enabled {
+            ButtonKind::Primary
+        } else {
+            ButtonKind::Secondary
+        };
+        widgets::button(ui.painter(), btn, st, label, kind);
+        if resp.clicked() && enabled {
+            self.send();
+        }
+
+        if !self.queue.is_empty() {
+            let clear =
+                Rect::from_min_size(pos2(area.min.x, area.max.y - cta_h), vec2(88.0, cta_h));
+            let r2 = ui.interact(clear, Id::unique("clear"), Sense::click());
+            let st2 = States::of(&r2, false, true);
+            widgets::button(ui.painter(), clear, st2, "Clear", ButtonKind::Ghost);
+            if r2.clicked() {
+                self.queue.clear();
+            }
+        }
+
+        if enabled {
+            let name = m
+                .peers
+                .iter()
+                .find(|p| Some(p.id) == self.selected)
+                .map_or(String::new(), |p| p.name.clone());
+            widgets::text_right(
+                ui.painter(),
+                pos2(area.max.x - w - theme::S3, area.max.y - cta_h / 2.0),
+                format!("to {name}"),
+                theme::caption(),
+                theme::LABEL3,
+            );
+        }
     }
 
-    for (text, font, color, dy) in &lines {
+    fn drop_zone(&mut self, ui: &mut egui::Ui, rect: Rect) {
+        let resp = ui.interact(rect, Id::unique("drop"), Sense::click());
+        let p = ui.painter();
+
+        let hovering = resp.hovered();
+        p.rect_filled(
+            rect,
+            widgets::cr(theme::R_PANEL),
+            if hovering {
+                theme::RAISED
+            } else {
+                theme::PANEL
+            },
+        );
+        // No border at rest. A permanently outlined rectangle reads as a card
+        // inside the canvas, which is exactly the nesting this refactor is
+        // removing; the outline appears when it means "you can drop here".
+        if hovering {
+            p.rect_stroke(
+                rect.shrink(0.5),
+                widgets::cr(theme::R_PANEL),
+                Stroke::new(1.0, theme::ACCENT),
+                egui::StrokeKind::Inside,
+            );
+        }
+
+        let c = rect.center();
+        widgets::icon(
+            p,
+            pos2(c.x, c.y - 30.0),
+            26.0,
+            widgets::Icon::Folder,
+            if hovering {
+                theme::ACCENT
+            } else {
+                theme::LABEL3
+            },
+        );
+
+        #[cfg(not(target_os = "android"))]
+        let (title, hint) = ("Drop files here", "or click to choose");
+        #[cfg(target_os = "android")]
+        let (title, hint) = (
+            "Ready to receive",
+            "sending from this phone is not wired up yet",
+        );
+
+        widgets::text_center(
+            p,
+            pos2(c.x, c.y + 8.0),
+            title,
+            theme::headline(),
+            theme::LABEL,
+        );
+        widgets::text_center(
+            p,
+            pos2(c.x, c.y + 28.0),
+            hint,
+            theme::callout(),
+            theme::LABEL3,
+        );
+
+        if resp.clicked() {
+            self.pick_files();
+        }
+        if hovering {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+    }
+
+    fn queue_list(&mut self, ui: &mut egui::Ui, rect: Rect) {
+        let p = ui.painter();
+        p.rect_filled(rect, widgets::cr(theme::R_PANEL), theme::PANEL);
+        p.rect_stroke(
+            rect.shrink(0.5),
+            widgets::cr(theme::R_PANEL),
+            Stroke::new(1.0, theme::SEP),
+            egui::StrokeKind::Inside,
+        );
+
+        let mut y = rect.min.y + theme::S3;
+        let mut remove: Option<usize> = None;
+
+        for (i, q) in self.queue.iter().enumerate() {
+            let row = Rect::from_min_size(
+                pos2(rect.min.x + theme::S3, y),
+                vec2(rect.width() - theme::S3 * 2.0, 34.0),
+            );
+            if row.max.y > rect.max.y - theme::S3 {
+                break;
+            }
+
+            widgets::text_left(
+                p,
+                pos2(row.min.x, row.center().y),
+                widgets::ellipsize(&q.name(), 40),
+                theme::body(),
+                theme::LABEL,
+            );
+            widgets::text_right(
+                p,
+                pos2(row.max.x - 26.0, row.center().y),
+                widgets::fmt_bytes(q.size),
+                theme::mono(11.0),
+                theme::LABEL3,
+            );
+
+            let x_btn =
+                Rect::from_center_size(pos2(row.max.x - 10.0, row.center().y), vec2(18.0, 18.0));
+            let xr = ui.interact(x_btn, Id::unique(("rm", i)), Sense::click());
+            if xr.hovered() {
+                ui.painter()
+                    .rect_filled(x_btn, widgets::cr(theme::R_CONTROL), theme::SEP);
+            }
+            widgets::icon(
+                ui.painter(),
+                x_btn.center(),
+                8.0,
+                widgets::Icon::Close,
+                if xr.hovered() {
+                    theme::LABEL
+                } else {
+                    theme::LABEL3
+                },
+            );
+            if xr.clicked() {
+                remove = Some(i);
+            }
+
+            y += 34.0;
+        }
+
+        if let Some(i) = remove {
+            self.queue.remove(i);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Transfers
+// ---------------------------------------------------------------------------
+
+impl App {
+    fn bottom_panel(&mut self, ui: &mut egui::Ui, rect: Rect, m: &UiModel, expanded: bool) {
+        let p = ui.painter();
+        p.rect_filled(rect, 0, theme::PANEL);
+        widgets::divider(p, rect.min.x, rect.max.x, rect.min.y + 0.5);
+
+        let header = Rect::from_min_size(rect.min, vec2(rect.width(), BOTTOM_COLLAPSED));
+        let resp = ui.interact(header, Id::unique("bottom-toggle"), Sense::click());
+        if resp.hovered() {
+            ui.painter().rect_filled(header, 0, theme::RAISED);
+        }
+        if resp.clicked() && !m.transfers.is_empty() {
+            self.bottom_open = !self.bottom_open;
+        }
+
+        Self::section_header(
+            ui.painter(),
+            rect.min.x + theme::S5,
+            header.center().y,
+            "TRANSFERS",
+            m.transfers.len(),
+        );
+
+        widgets::icon(
+            ui.painter(),
+            pos2(rect.max.x - theme::S5, header.center().y),
+            10.0,
+            widgets::Icon::Chevron,
+            theme::LABEL3,
+        );
+
+        if !expanded {
+            // Collapsed: one hairline along the top edge carrying the most
+            // relevant progress, so a transfer is visible without expanding.
+            if let Some(t) = m
+                .transfers
+                .iter()
+                .find(|t| t.state == TransferState::Active)
+            {
+                let bar = Rect::from_min_size(
+                    pos2(rect.min.x, rect.min.y + 0.5),
+                    vec2(rect.width() * t.fraction(), 2.0),
+                );
+                ui.painter().rect_filled(bar, 0, theme::PROGRESS);
+            }
+            return;
+        }
+
+        let mut y = rect.min.y + BOTTOM_COLLAPSED;
+        for (i, t) in m.transfers.iter().enumerate() {
+            let row = Rect::from_min_size(
+                pos2(rect.min.x + theme::S5, y),
+                vec2(rect.width() - theme::S5 * 2.0, XFER_H),
+            );
+            if row.max.y > rect.max.y - theme::S2 {
+                break;
+            }
+            self.transfer_row(ui, row, t, i);
+            y += XFER_H;
+        }
+    }
+
+    fn transfer_row(&mut self, ui: &mut egui::Ui, rect: Rect, t: &TransferRow, index: usize) {
+        let p = ui.painter();
+
         widgets::text_left(
             p,
-            Pos2::new(r.min.x + 18.0, r.min.y + dy),
-            text,
-            font.clone(),
-            *color,
+            pos2(rect.min.x, rect.min.y + 14.0),
+            widgets::ellipsize(&t.file, 44),
+            theme::body(),
+            theme::LABEL,
         );
+
+        let (status, color) = match t.state {
+            TransferState::Active => {
+                let eta = t
+                    .eta_secs()
+                    .map_or_else(String::new, |s| format!(" · {}", widgets::fmt_eta(s)));
+                (
+                    format!(
+                        "{} / {}{eta}",
+                        widgets::fmt_bytes(t.bytes_done),
+                        widgets::fmt_bytes(t.total)
+                    ),
+                    theme::LABEL2,
+                )
+            }
+            TransferState::Pending => ("waiting".to_string(), theme::LABEL3),
+            TransferState::Done => (widgets::fmt_bytes(t.total), theme::PROGRESS),
+            TransferState::Failed => ("failed".to_string(), theme::DANGER),
+        };
+
+        widgets::text_right(
+            p,
+            pos2(rect.max.x - 26.0, rect.min.y + 14.0),
+            status,
+            theme::mono(11.0),
+            color,
+        );
+
+        let bar = Rect::from_min_size(
+            pos2(rect.min.x, rect.min.y + 34.0),
+            vec2(rect.width() - 26.0, 3.0),
+        );
+        let (fraction, fill) = match t.state {
+            TransferState::Active | TransferState::Done => (t.fraction(), theme::PROGRESS),
+            TransferState::Failed => (t.fraction(), theme::DANGER),
+            TransferState::Pending => (0.0, theme::SEP),
+        };
+        widgets::progress(p, bar, fraction, fill);
+
+        widgets::text_left(
+            p,
+            pos2(rect.min.x, rect.min.y + 46.0),
+            format!(
+                "{} · {}",
+                widgets::ellipsize(&t.peer, 18),
+                widgets::fmt_speed(t.speed_bps)
+            ),
+            theme::caption(),
+            theme::LABEL3,
+        );
+
+        if matches!(t.state, TransferState::Active | TransferState::Pending) {
+            let x_btn =
+                Rect::from_center_size(pos2(rect.max.x - 8.0, rect.center().y), vec2(20.0, 20.0));
+            let xr = ui.interact(x_btn, Id::unique(("cancel", index)), Sense::click());
+            if xr.hovered() {
+                ui.painter()
+                    .rect_filled(x_btn, widgets::cr(theme::R_CONTROL), theme::SEP);
+            }
+            widgets::icon(
+                ui.painter(),
+                x_btn.center(),
+                8.0,
+                widgets::Icon::Close,
+                if xr.hovered() {
+                    theme::LABEL
+                } else {
+                    theme::LABEL3
+                },
+            );
+            if xr.clicked() {
+                let _ = self.actions.try_send(UiAction::Cancel(t.id.clone()));
+            }
+        }
     }
 }
 

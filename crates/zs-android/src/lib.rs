@@ -321,9 +321,7 @@ mod android {
 
         // Reference-counted locks can be released by anything; a single
         // acquire/release pair is easier to reason about.
-        if let Err(e) =
-            env.call_method(&lock, "setReferenceCounted", "(Z)V", &[JValue::Bool(0)])
-        {
+        if let Err(e) = env.call_method(&lock, "setReferenceCounted", "(Z)V", &[JValue::Bool(0)]) {
             log::error!("multicast lock: setReferenceCounted failed: {e}");
             return None;
         }

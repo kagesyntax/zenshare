@@ -304,11 +304,7 @@ async fn do_send(
     Ok(())
 }
 
-fn spawn_receive(
-    model: &Arc<RwLock<UiModel>>,
-    incoming: quinn::Incoming,
-    paths: Arc<AppPaths>,
-) {
+fn spawn_receive(model: &Arc<RwLock<UiModel>>, incoming: quinn::Incoming, paths: Arc<AppPaths>) {
     let model = Arc::clone(model);
     tokio::spawn(async move {
         let conn = match incoming.await {

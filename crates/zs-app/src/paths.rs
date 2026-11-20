@@ -34,7 +34,10 @@ impl AppPaths {
             .and_then(|u| u.download_dir().map(std::path::Path::to_path_buf))
             .unwrap_or_else(|| dir.join("Downloads"));
 
-        Ok(Self { identity: dir.join("identity.key"), downloads })
+        Ok(Self {
+            identity: dir.join("identity.key"),
+            downloads,
+        })
     }
 
     /// Android layout: both inside the app sandbox. `downloads` is the external
@@ -43,8 +46,13 @@ impl AppPaths {
     /// without a storage-permission dance.
     #[must_use]
     pub fn android(internal: PathBuf, external: Option<PathBuf>) -> Self {
-        let downloads = external.unwrap_or_else(|| internal.clone()).join("ZenShare");
-        Self { identity: internal.join("identity.key"), downloads }
+        let downloads = external
+            .unwrap_or_else(|| internal.clone())
+            .join("ZenShare");
+        Self {
+            identity: internal.join("identity.key"),
+            downloads,
+        }
     }
 
     /// Create the directories that must exist before the first transfer.

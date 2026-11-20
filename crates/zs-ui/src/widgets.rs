@@ -32,7 +32,7 @@ pub fn card_bordered(p: &Painter, rect: Rect, fill: Color32, border: Color32, ra
 
 /// A pill / chip.
 pub fn pill(p: &Painter, rect: Rect, fill: Color32) {
-    p.rect_filled(rect, cr(theme::RADIUS_PILL), fill);
+    p.rect_filled(rect, cr(theme::R_PILL), fill);
 }
 
 /// Text with a left anchor.
@@ -52,23 +52,23 @@ pub fn text_center(p: &Painter, pos: Pos2, s: impl ToString, font: FontId, color
 
 /// Progress bar: track + fill, fully rounded.
 pub fn progress(p: &Painter, rect: Rect, fraction: f32, color: Color32) {
-    p.rect_filled(rect, cr((rect.height() / 2.0) as u8), theme::SURFACE_HI);
+    let r = cr((rect.height() / 2.0) as u8);
+    p.rect_filled(rect, r, theme::SEP);
     let f = fraction.clamp(0.0, 1.0);
     if f > 0.0 {
+        // Never narrower than the track height: a 0.4% transfer should read as
+        // "started", not as an empty bar.
         let w = (rect.width() * f).max(rect.height());
         let filled = Rect::from_min_size(rect.min, vec2(w, rect.height()));
-        p.rect_filled(filled, cr((rect.height() / 2.0) as u8), color);
+        p.rect_filled(filled, r, color);
     }
 }
 
 /// The little identity disc shown for each peer.
 pub fn avatar(p: &Painter, center: Pos2, radius: f32, seed: u32, initials: &str) {
-    // Two accents, chosen deterministically so a device keeps its colour.
-    let base = if seed.is_multiple_of(2) {
-        theme::ACCENT
-    } else {
-        theme::ACCENT_ALT
-    };
+    // A hue derived from the device id, so every peer gets its own colour and
+    // keeps it. Two fixed accents meant half the devices looked identical.
+    let base = hue_color(seed);
     p.circle_filled(center, radius, base.gamma_multiply(0.14));
     p.circle_stroke(center, radius, Stroke::new(1.0, base.gamma_multiply(0.35)));
     p.text(
@@ -336,4 +336,153 @@ pub fn ellipsize(s: &str, max: usize) -> String {
     let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
     out.push('…');
     out
+}
+
+// ---------------------------------------------------------------------------
+// Primitives added for the HIG refactor
+// ---------------------------------------------------------------------------
+
+/// Deterministic, legible tint for a device, from its seed.
+fn hue_color(seed: u32) -> Color32 {
+    let hue = (seed.wrapping_mul(2_654_435_761) % 360) as f32;
+    let (r, g, b) = hsv_to_rgb(hue, 0.42, 0.92);
+    Color32::from_rgb(r, g, b)
+}
+
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
+    let c = v * s;
+    let hp = (h / 60.0).rem_euclid(6.0);
+    let x = c * (1.0 - (hp % 2.0 - 1.0).abs());
+    let (r1, g1, b1) = match hp as u32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let m = v - c;
+    (
+        ((r1 + m) * 255.0) as u8,
+        ((g1 + m) * 255.0) as u8,
+        ((b1 + m) * 255.0) as u8,
+    )
+}
+
+/// 1px hairline from `x0` to `x1` at `y`.
+pub fn divider(p: &Painter, x0: f32, x1: f32, y: f32) {
+    p.line_segment(
+        [Pos2::new(x0, y), Pos2::new(x1, y)],
+        Stroke::new(1.0, theme::SEP),
+    );
+}
+
+/// Visual state of a painted control, derived from its `Response`.
+///
+/// Four independent booleans rather than an enum, because they are independent:
+/// a control can be hovered *and* selected *and* focused at once.
+#[allow(clippy::struct_excessive_bools)]
+#[derive(Clone, Copy, Debug, Default)]
+pub struct States {
+    /// Pointer is over it.
+    pub hovered: bool,
+    /// Primary button is held on it.
+    pub pressed: bool,
+    /// It is the current selection.
+    pub selected: bool,
+    /// It can be used.
+    pub enabled: bool,
+}
+
+impl States {
+    /// Derive from a response. `enabled` is separate because a painted control
+    /// still receives a response when it is logically disabled.
+    #[must_use]
+    pub fn of(resp: &egui::Response, selected: bool, enabled: bool) -> Self {
+        Self {
+            hovered: enabled && resp.hovered(),
+            pressed: enabled && resp.is_pointer_button_down_on(),
+            selected,
+            enabled,
+        }
+    }
+}
+
+/// Button emphasis.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ButtonKind {
+    /// One per view. Accent fill.
+    Primary,
+    /// Everything else. Control fill.
+    Secondary,
+    /// Low-stakes inline actions.
+    Ghost,
+}
+
+/// Paint a button. The caller owns the rect and the response.
+// Arms are kept one-per-state rather than merged: the table is the specification
+// of how a button looks, and collapsing rows makes it harder to check.
+#[allow(clippy::match_same_arms)]
+pub fn button(p: &Painter, rect: Rect, states: States, label: &str, kind: ButtonKind) -> Rect {
+    let (fill, text_color) = match (kind, states.enabled, states.pressed, states.hovered) {
+        (ButtonKind::Primary, false, _, _) => (theme::SEP, theme::LABEL3),
+        (ButtonKind::Primary, true, true, _) => (theme::ACCENT_PRESS, theme::ON_ACCENT),
+        (ButtonKind::Primary, true, false, true) => {
+            (theme::ACCENT.gamma_multiply(0.92), theme::ON_ACCENT)
+        }
+        (ButtonKind::Primary, true, false, false) => (theme::ACCENT, theme::ON_ACCENT),
+
+        (ButtonKind::Secondary, false, _, _) => (theme::PANEL, theme::LABEL3),
+        (ButtonKind::Secondary, true, true, _) => (theme::SEP_STRONG, theme::LABEL),
+        (ButtonKind::Secondary, true, false, true) => (theme::RAISED, theme::LABEL),
+        (ButtonKind::Secondary, true, false, false) => (theme::CONTROL, theme::LABEL2),
+
+        (ButtonKind::Ghost, false, _, _) => (Color32::TRANSPARENT, theme::LABEL3),
+        // Ghost shares its hover treatment with Secondary on purpose: both sit
+        // on the same surfaces, so a different hover would look like a bug.
+        (ButtonKind::Ghost, true, _, true) => (theme::RAISED, theme::LABEL),
+        (ButtonKind::Ghost, true, _, false) => (Color32::TRANSPARENT, theme::LABEL2),
+    };
+
+    if fill != Color32::TRANSPARENT {
+        p.rect_filled(rect, cr(theme::R_CONTROL), fill);
+    }
+
+    p.text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        label,
+        theme::headline(),
+        text_color,
+    )
+}
+
+/// 2px focus ring, drawn outside the control so it never clips the label.
+pub fn focus_ring(p: &Painter, rect: Rect) {
+    p.rect_stroke(
+        rect.expand(2.0),
+        cr(theme::R_CONTROL + 2),
+        Stroke::new(2.0, theme::ACCENT),
+        egui::StrokeKind::Outside,
+    );
+}
+
+/// Small count or status pill.
+pub fn chip(p: &Painter, rect: Rect, text: &str, color: Color32) {
+    p.rect_filled(rect, cr(theme::R_PILL), color.gamma_multiply(0.14));
+    p.text(
+        rect.center(),
+        Align2::CENTER_CENTER,
+        text,
+        theme::label(),
+        color,
+    );
+}
+
+/// 1px vertical hairline at `x`, from `y0` to `y1`.
+pub fn vdivider(p: &Painter, x: f32, y0: f32, y1: f32) {
+    p.line_segment(
+        [Pos2::new(x, y0), Pos2::new(x, y1)],
+        Stroke::new(1.0, theme::SEP),
+    );
 }
